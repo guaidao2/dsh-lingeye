@@ -509,7 +509,7 @@ export default class LingeyeStore extends Service {
       data[tableName] = await this.rows(sessionId, tableName)
     }
     data.edges = await this.rows(sessionId, 'edges')
-    data.attackPaths = await this.rows(sessionId, 'attack_paths')
+    data.attackPaths = await this.rows(sessionId, TABLE_OF.path)
     data.engagement = engagement ?? null
     return data
   }
@@ -1131,7 +1131,7 @@ export default class LingeyeStore extends Service {
         })) : [],
         createdAt: now(),
       }
-      await domain.table('attackPaths').put(recordKey(sessionId, id), record)
+      await domain.table(TABLE_OF.path).put(recordKey(sessionId, id), record)
       return record
     })
   }

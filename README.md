@@ -47,7 +47,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.1.3.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.1.4.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。
