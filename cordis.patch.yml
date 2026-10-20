@@ -1,0 +1,25 @@
+# dsh-lingeye bundle patch: the profile layer that installs the Web tab, the
+# shared store service, and (in presets/lingeye.patch.yml) the agent presets
+# that mount the tool surfaces.
+#
+# Row ids are global across all layers. Do NOT insert these rows again from a
+# profile patch: a duplicate id crashes the loader.
+
+- insert:
+    # Built-in workaround for the DSH Windows ACL sandbox on non-system-drive
+    # workspaces (vendored MIT; no ACL changes). Windows-only; override this row
+    # with `config: { enabled: false }` to disable it.
+    - id: lingeye-acl-patch
+      name: 'dsh-lingeye/acl-patch'
+      disabled: !!js process.platform !== 'win32'
+
+    # Package root: inert host seat plus the client half the Web plugin table
+    # attributes the browser bundle to (the scanner keys it by package name).
+    - id: lingeye-ui
+      name: 'dsh-lingeye'
+
+    # Shared store service: owns the `lingeye` storage domain and exposes it as
+    # `lingeyeStore` to the preset-scoped tool plugins. The domain uses the
+    # profile's default storage backend; only this plugin's records live there.
+    - id: lingeye-store
+      name: 'dsh-lingeye/store'

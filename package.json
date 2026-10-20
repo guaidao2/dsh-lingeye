@@ -1,0 +1,60 @@
+{
+  "name": "dsh-lingeye",
+  "version": "0.1.0",
+  "description": "灵眼：DeepSeek Harness 的授权安全测试工作台插件（探索黑板、资产与漏洞交付物、复测与报告）。",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./store": "./src/store.js",
+    "./commander": "./src/commander.js",
+    "./worker": "./src/worker.js",
+    "./retest": "./src/retest.js",
+    "./acl-patch": "./src/acl-patch.js",
+    "./client": "./src/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/**/*.js",
+    "vendor/acl-sandbox-patch/preload.cjs",
+    "vendor/acl-sandbox-patch/LICENSE",
+    "cordis.patch.yml",
+    "presets/**",
+    "assets/**",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^0.2.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.1",
+    "@deepseek-ai/dsh-tools": "^0.2.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": [
+        "./cordis.patch.yml",
+        "./presets/lingeye.patch.yml"
+      ]
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  }
+}

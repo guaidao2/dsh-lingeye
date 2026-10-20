@@ -1,0 +1,31 @@
+# æœ¬åœ°å‚è€ƒä»“åº“ï¼ˆåªè¯»å¿«ç…§ï¼Œä¸è¿›å…¥ç‰ˆæœ¬åº“ï¼‰
+refs/
+
+# ä¾èµ–ä¸æ„å»ºäº§ç‰©
+node_modules/
+dist/
+*.tgz
+
+# è¿è¡Œäº§ç‰©
+deepseekhardness/
+.tmp/
+
+# ç¼–è¾‘å™¨ä¸ç³»ç»Ÿæ–‡ä»¶
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ÁéÑÛµ¼³ö²úÎï
+lingeye/
+
+# ²âÊÔÁÙÊ±Ä¿Â¼
+.tmp-test/
+
+# ÄÚÖÃ ACL ĞŞ¸´µÄÔËĞĞÆÚ½µ¼¶×´Ì¬
+vendor/acl-sandbox-patch/.degraded.state
+
+vendor/.degraded.state
+
+# ±¾µØÉè¼ÆÎÄµµÓë½ØÍ¼£¬²»Ëæ·¢²¼Ìá½»
+docs/
