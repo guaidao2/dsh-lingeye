@@ -152,6 +152,8 @@ export default class LingeyeStore extends Service {
     this.dispatchTimer = undefined
     this.publishTimers = new Map()
     this.publishQueues = new Map()
+    this.publishRetries = new Map()
+    this.retryTimers = new Map()
     this.publishModule = undefined
     ctx.effect(() => async () => {
       const pending = this.domainPromise
@@ -163,6 +165,10 @@ export default class LingeyeStore extends Service {
       this.autoAttempts.clear()
       for (const timer of this.publishTimers.values()) clearTimeout(timer)
       this.publishTimers.clear()
+      for (const timer of this.retryTimers.values()) clearTimeout(timer)
+      this.retryTimers.clear()
+      this.publishQueues.clear()
+      this.publishRetries.clear()
       if (pending !== undefined) await (await pending).close()
     }, 'lingeye:domain')
     registerProjection(ctx)
@@ -218,12 +224,33 @@ export default class LingeyeStore extends Service {
         initialized: true,
         updatedAt: now(),
       })
-      if (payload === undefined) return
+      if (payload === undefined) {
+        this.ctx.logger?.warn('lingeye state publish skipped: snapshot is not JSON-serializable')
+        return
+      }
       this.publishModule ??= import('@deepseek-ai/dsh-session')
+      this.publishModule.catch(() => {
+        this.publishModule = undefined
+      })
       const { appendPluginRecord } = await this.publishModule
       appendPluginRecord(session, 'plugin:lingeye/state', payload)
+      this.publishRetries.delete(sessionId)
+      const retry = this.retryTimers.get(sessionId)
+      if (retry !== undefined) {
+        clearTimeout(retry)
+        this.retryTimers.delete(sessionId)
+      }
     } catch (error) {
       this.ctx.logger?.warn(`lingeye state publish failed: ${error instanceof Error ? error.message : String(error)}`)
+      const attempts = (this.publishRetries.get(sessionId) ?? 0) + 1
+      this.publishRetries.set(sessionId, attempts)
+      if (attempts <= 3 && !this.retryTimers.has(sessionId)) {
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(sessionId)
+          void this.publishState(sessionId)
+        }, 2000)
+        this.retryTimers.set(sessionId, timer)
+      }
     }
   }
 

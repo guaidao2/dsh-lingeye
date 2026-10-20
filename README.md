@@ -29,7 +29,7 @@
 - 复测：独立复测记录，结论 reproduced / fixed / inconclusive，不覆盖原始漏洞。
 - 报告与导出：`report.md`、`findings.json`、`assets.json`、`graph.json`、`coverage.json`、逐漏洞 Markdown、证据文件。
 - 可选宿主调度器：侦察/执行子 agent 可由宿主按前沿自动派发。
-- Web 页签：总览、探索、资产、漏洞、证据、数据流、报告、复测。
+- Web 页签：总览、探索（列表/链路图切换）、资产、漏洞、证据、数据流、报告、复测。
 
 ![复测页签](assets/tab-retest.png)
 

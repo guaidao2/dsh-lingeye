@@ -210,17 +210,125 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** Layered DAG view of the exploration chain; the list stays available. */
+    function ExplorationGraph({ data }) {
+      const containerRef = React.useRef(null)
+      React.useEffect(() => {
+        const element = containerRef.current
+        if (element !== null) element.scrollTop = 0
+      }, [])
+      const goals = data.goals || []
+      const goalNodes = goals.length > 0
+        ? goals.map(goal => ({ id: goal.id, kind: 'goal', label: goal.text || (data.engagement && data.engagement.target) || '目标' }))
+        : [{ id: 'goal-1', kind: 'goal', label: (data.engagement && data.engagement.target) || '目标' }]
+      const nodes = [
+        ...goalNodes,
+        ...(data.intents || []).map(intent => ({ id: intent.id, kind: 'intent', label: intent.title, state: intent.state })),
+        ...(data.facts || []).map(fact => ({ id: fact.id, kind: 'fact', label: fact.detail, basis: fact.basis })),
+        ...(data.findings || []).map(finding => ({ id: finding.id, kind: 'finding', label: finding.title, severity: finding.severity })),
+      ]
+      const byId = new Map(nodes.map(node => [node.id, node]))
+      const links = []
+      const seen = new Set()
+      const addLink = (srcId, dstId, kind) => {
+        if (!byId.has(srcId) || !byId.has(dstId)) return
+        const key = `${srcId}>${dstId}`
+        if (seen.has(key)) return
+        seen.add(key)
+        links.push({ srcId, dstId, kind })
+      }
+      for (const edge of data.edges || []) {
+        if (['spawns', 'derived_from', 'yields', 'proves'].includes(edge.kind)) addLink(edge.srcId, edge.dstId, edge.kind)
+      }
+      for (const intent of data.intents || []) if (intent.goalId) addLink(intent.goalId, intent.id, 'spawns')
+      for (const fact of data.facts || []) if (fact.intentId) addLink(fact.intentId, fact.id, 'yields')
+      for (const finding of data.findings || []) if (finding.intentId) addLink(finding.intentId, finding.id, 'proves')
+
+      const goalColumn = nodes.filter(node => node.kind === 'goal')
+      const intentNodes = nodes.filter(node => node.kind === 'intent')
+      const leafNodes = nodes.filter(node => node.kind !== 'goal' && node.kind !== 'intent')
+      const columns = [goalColumn, intentNodes, leafNodes]
+      const rowHeight = 64
+      const columnWidth = 245
+      const height = Math.max(220, Math.max(1, ...columns.map(column => column.length)) * rowHeight + 30)
+      const width = columnWidth * columns.length + 30
+      const positions = new Map()
+      columns.forEach((column, columnIndex) => {
+        column.forEach((node, index) => {
+          positions.set(node.id, { x: 20 + columnIndex * columnWidth, y: 20 + index * rowHeight })
+        })
+      })
+      const fillOf = (node) => {
+        if (node.kind === 'goal') return C.brand
+        if (node.kind === 'intent') return node.state === 'done' ? C.success : node.state === 'blocked' ? C.error : C.info
+        if (node.kind === 'finding') return C.error
+        return BASIS_COLOR[node.basis] || C.muted
+      }
+      const strokeOf = (link) => link.kind === 'derived_from' ? C.warn : C.faint
+      const short = text => {
+        const value = String(text || '')
+        return value.length > 26 ? `${value.slice(0, 25)}…` : value
+      }
+      if (nodes.length === 1 && links.length === 0) return h('p', { style: S.faint }, '（还没有探索节点）')
+      return h('div', {
+        ref: containerRef,
+        style: { overflow: 'auto', maxHeight: '520px', border: C.border, borderRadius: '8px', background: C.layer2 },
+      },
+        h('svg', {
+          viewBox: `0 0 ${width} ${height}`,
+          style: { display: 'block', width: '100%', minWidth: `${width}px`, height: 'auto' },
+          role: 'img',
+          'aria-label': '灵眼探索链路图',
+        },
+        links.map((link, index) => {
+          const from = positions.get(link.srcId)
+          const to = positions.get(link.dstId)
+          if (!from || !to) return null
+          return h('line', {
+            key: `edge-${index}`,
+            x1: from.x + 180,
+            y1: from.y + 22,
+            x2: to.x,
+            y2: to.y + 22,
+            stroke: strokeOf(link),
+            'stroke-width': 1,
+          })
+        }),
+        nodes.map(node => {
+          const point = positions.get(node.id)
+          if (!point) return null
+          return h('g', { key: node.id, transform: `translate(${point.x},${point.y})` },
+            h('rect', { width: 180, height: 44, rx: 8, fill: C.layer, stroke: fillOf(node), 'stroke-width': 1.5 }),
+            h('text', { x: 10, y: 17, fill: C.faint, fontSize: 10 }, `${node.kind} · ${node.id}`),
+            h('text', { x: 10, y: 33, fill: C.text, fontSize: 11 }, short(node.label)))
+        }),
+      ))
+    }
+
     function Explore({ data }) {
+      const [mode, setMode] = React.useState('list')
       const intents = [...(data.intents || [])].sort((a, b) => idNum(a) - idNum(b))
-      if (intents.length === 0) return card('探索链路', h('p', { style: S.faint }, '（还没有意图）'))
-      return h('div', { style: { display: 'grid', gap: '10px' } },
+      const toggle = h('div', { style: { display: 'flex', gap: '4px' } },
+        h('button', {
+          type: 'button',
+          style: mode === 'list' ? { ...S.tab, ...S.tabActive } : S.tab,
+          onClick: () => setMode('list'),
+        }, '列表'),
+        h('button', {
+          type: 'button',
+          style: mode === 'graph' ? { ...S.tab, ...S.tabActive } : S.tab,
+          onClick: () => setMode('graph'),
+        }, '图'))
+      if (mode === 'graph') return card('探索链路', h(ExplorationGraph, { data }), toggle)
+      if (intents.length === 0) return card('探索链路', h('p', { style: S.faint }, '（还没有意图）'), toggle)
+      return card('探索链路', h('div', { style: { display: 'grid', gap: '10px' } },
         intents.map((intent) => {
           const facts = (data.facts || []).filter(fact => fact.intentId === intent.id)
           const findings = (data.findings || []).filter(finding => finding.intentId === intent.id)
           const anchors = intent.derivedFromFactIds && intent.derivedFromFactIds.length > 0
             ? 'derived from ' + intent.derivedFromFactIds.join(', ')
             : (intent.goalId ? 'spawned by ' + intent.goalId : '无锚点')
-          return h('section', { key: intent.id, style: S.card },
+          return h('section', { key: intent.id, style: S.item },
             h('div', { style: S.itemHead },
               badge(intent.state, STATE_COLOR[intent.state]),
               h('span', { style: S.itemTitle }, intent.title),
@@ -243,7 +351,7 @@ window.__ModuleLoader__.load({
                   badge(finding.severity, SEV_COLOR[finding.severity]),
                   h('span', { style: S.itemTitle }, finding.title))))) : null,
           )
-        }))
+        })), toggle)
     }
 
     function Assets({ data }) {

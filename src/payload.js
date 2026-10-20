@@ -1,18 +1,72 @@
 /**
- * Make one host snapshot safe for `appendPluginRecord`.
+ * Build a session-record-safe payload for the live projection.
  *
  * Session plugin records must be losslessly JSON-serializable. Store rows
  * routinely carry `undefined` optional fields (`activity.intentId`,
  * `asset.parentId`, `evidence.findingId`), and the session layer rejects such
- * a payload instead of silently dropping the key. A JSON round trip removes
- * those keys; any non-serializable value (BigInt, cycle) yields undefined.
+ * a payload. This cleaner removes undefined object keys and undefined array
+ * entries (instead of silently turning them into null), rejects functions,
+ * symbols, BigInt and cycles, and caps evidence bodies so one write cannot
+ * bloat the durable session log.
  *
- * @param value - candidate record payload.
+ * @param state - full engagement snapshot.
  * @returns lossless plain JSON, or undefined when the value cannot round-trip.
  */
-export function cleanRecordPayload(value) {
+
+const EVIDENCE_CONTENT_LIMIT = 800
+
+function walk(value, seen) {
+  if (value === null) return null
+  const type = typeof value
+  if (type === 'string' || type === 'boolean') return value
+  if (type === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('non-finite number')
+    return value
+  }
+  if (type === 'undefined') return undefined
+  if (type !== 'object') throw new TypeError(`unsupported ${type}`)
+  if (seen.has(value)) throw new TypeError('cycle')
+  seen.add(value)
   try {
-    return JSON.parse(JSON.stringify(value))
+    if (Array.isArray(value)) {
+      const items = []
+      for (const item of value) {
+        const next = walk(item, seen)
+        if (next !== undefined) items.push(next)
+      }
+      return items
+    }
+    const out = {}
+    for (const [key, item] of Object.entries(value)) {
+      const next = walk(item, seen)
+      if (next !== undefined) out[key] = next
+    }
+    return out
+  } finally {
+    seen.delete(value)
+  }
+}
+
+/**
+ * @param state - engagement snapshot.
+ * @returns a record-safe payload with trimmed evidence bodies.
+ */
+export function cleanRecordPayload(state) {
+  const projection = {
+    ...state,
+    ...(Array.isArray(state.evidence)
+      ? {
+          evidence: state.evidence.map(evidence => ({
+            ...evidence,
+            content: typeof evidence.content === 'string' && evidence.content.length > EVIDENCE_CONTENT_LIMIT
+              ? `${evidence.content.slice(0, EVIDENCE_CONTENT_LIMIT)}…`
+              : evidence.content,
+          })),
+        }
+      : {}),
+  }
+  try {
+    return walk(projection, new WeakSet())
   } catch {
     return undefined
   }
