@@ -2,6 +2,7 @@
   "name": "dsh-lingeye",
   "version": "0.1.0",
   "description": "灵眼：DeepSeek Harness 的授权安全测试工作台插件（探索黑板、资产与漏洞交付物、复测与报告）。",
+  "author": "guaidao2 & coolmoon",
   "type": "module",
   "main": "./src/index.js",
   "exports": {

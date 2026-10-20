@@ -139,7 +139,7 @@ dsh --profile <dev-profile> --no-open --port 0
 
 ## 许可
 
-MIT。内置的 Windows ACL 修复来自 dsh-acl-sandbox-patch（MIT），署名与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+MIT。Copyright (c) 2026 guaidao2 & coolmoon。内置的 Windows ACL 修复来自 dsh-acl-sandbox-patch（MIT），署名与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 参考
 
