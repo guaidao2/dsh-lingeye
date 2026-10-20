@@ -43,6 +43,39 @@ function parseObject(text) {
   }
 }
 
+/**
+ * Fold one committed session event into the Web view.
+ *
+ * Live writes publish a whole-state `plugin:lingeye/state` record; `ly_start`
+ * and `ly_state` results remain the replay/fallback path. A malformed or
+ * foreign payload leaves the state untouched.
+ *
+ * @param state - previous state (null before the first event).
+ * @param event - committed session event.
+ * @returns next state, or the same reference when the event is irrelevant.
+ */
+export function foldLingeyeEvent(state, event) {
+  if (event.type === 'plugin:lingeye/state' && event.data?.initialized === true) {
+    return event.data
+  }
+  if (event.type === 'tool/call' && typeof event.data?.name === 'string') {
+    if (pendingCalls.size > 2000) pendingCalls.clear()
+    pendingCalls.set(String(event.data.callId), event.data.name)
+    return state
+  }
+  if (event.type === 'tool/result') {
+    const callId = String(event.data?.message?.toolCallId ?? event.data?.callId)
+    const toolName = pendingCalls.get(callId)
+    if (toolName === undefined) return state
+    pendingCalls.delete(callId)
+    if (toolName !== 'ly_state' && toolName !== 'ly_start') return state
+    const payload = parseObject(resultText(event.data.message))
+    if (payload !== undefined && payload.initialized === true) return payload
+    return state
+  }
+  return state
+}
+
 /** Register the `lingeye` projection unit on the session-projection registry. */
 export function registerProjection(ctx) {
   ctx.inject(['sessionProjections'], (scope) => {
@@ -50,30 +83,15 @@ export function registerProjection(ctx) {
       key: 'lingeye',
       stateSchema,
       init: () => null,
-      apply: (state, event) => {
-        if (event.type === 'tool/call' && typeof event.data?.name === 'string') {
-          if (pendingCalls.size > 2000) pendingCalls.clear()
-          pendingCalls.set(String(event.data.callId), event.data.name)
-          return state
-        }
-        if (event.type === 'tool/result') {
-          const callId = String(event.data?.message?.toolCallId ?? event.data?.callId)
-          const toolName = pendingCalls.get(callId)
-          if (toolName === undefined) return state
-          pendingCalls.delete(callId)
-          if (toolName !== 'ly_state' && toolName !== 'ly_start') return state
-          const payload = parseObject(resultText(event.data.message))
-          if (payload !== undefined && payload.initialized === true) return payload
-          return state
-        }
-        return state
-      },
+      apply: foldLingeyeEvent,
       wire: {
         viewSchema: stateSchema,
         view: state => state,
       },
       // v2: the result call id is the tool message id, not a bare data field.
-      stateVersion: 2,
+      // v3: write-triggered plugin records carry the whole state.
+      // v4: those records also carry counts and the rendered report.
+      stateVersion: 4,
     })
   })
 }

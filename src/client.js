@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
 
     const NS = 'lingeye'
     const h = React.createElement
+    let clientCtx
 
     const zh = {
       tab: '灵眼',
@@ -379,6 +380,17 @@ window.__ModuleLoader__.load({
     function LingeyeView(props) {
       const projection = props.useProjection ? props.useProjection('lingeye') : undefined
       const [tab, setTab] = React.useState('overview')
+      const [nowTick, setNowTick] = React.useState(Date.now())
+      React.useEffect(() => {
+        const timer = setInterval(() => setNowTick(Date.now()), 1000)
+        return () => clearInterval(timer)
+      }, [])
+      React.useEffect(() => {
+        const sessions = clientCtx?.sessions
+        if (sessions !== undefined && typeof sessions.refreshProjections === 'function' && props.sessionId !== undefined) {
+          Promise.resolve(sessions.refreshProjections(props.sessionId)).catch(() => undefined)
+        }
+      }, [props.sessionId])
       if (projection === undefined) return emptyState(props.t ? props.t('loading') : '正在加载灵眼记录…')
       if (projection === null || projection.initialized !== true) {
         return emptyState(props.t ? props.t('empty') : '灵眼渗透测试模式尚未开始：在会话里调用 ly_start 建立本次测试。')
@@ -386,6 +398,15 @@ window.__ModuleLoader__.load({
       const data = projection
       const active = TABS.find(item => item.id === tab) || TABS[0]
       const counts = data.counts || {}
+      const stamp = typeof data.updatedAt === 'string' ? Date.parse(data.updatedAt) : Number.NaN
+      const age = Number.isFinite(stamp) ? Math.max(0, Math.floor((nowTick - stamp) / 1000)) : undefined
+      const freshness = age === undefined ? '更新时间未知' : age < 2 ? '刚刚更新' : `更新于 ${age} 秒前`
+      const refresh = () => {
+        const sessions = clientCtx?.sessions
+        if (sessions !== undefined && typeof sessions.refreshProjections === 'function' && props.sessionId !== undefined) {
+          Promise.resolve(sessions.refreshProjections(props.sessionId)).catch(() => undefined)
+        }
+      }
       return h('div', { style: S.root, 'data-testid': 'lingeye-view' },
         h('header', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
           h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '8px' } },
@@ -394,7 +415,10 @@ window.__ModuleLoader__.load({
             badge(`目标 ${counts.goals || 0}`, C.muted),
             badge(`意图 ${counts.intents || 0}`, C.muted),
             badge(`事实 ${counts.facts || 0}`, C.muted),
-            badge(`漏洞 ${counts.findings || 0}`, C.muted))),
+            badge(`漏洞 ${counts.findings || 0}`, C.muted)),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('span', { style: S.faint }, freshness),
+            h('button', { type: 'button', style: S.button, onClick: refresh }, '刷新'))),
         h('nav', { style: S.tabBar, 'data-testid': 'lingeye-tabs' },
           TABS.map(item => h('button', {
             key: item.id,
@@ -435,6 +459,7 @@ window.__ModuleLoader__.load({
      * @param {object} ctx - client root context.
      */
     function apply(ctx) {
+      clientCtx = ctx
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'lingeye:dictionaries')
       const t = ctx.locale.bind(NS)
       const sessions = ctx.sessions

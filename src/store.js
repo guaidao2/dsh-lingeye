@@ -24,6 +24,7 @@ import {
   EDGE_KINDS,
 } from './spec.js'
 import { registerProjection } from './projection.js'
+import { cleanRecordPayload } from './payload.js'
 import { buildReport, buildExportBundle } from './report.js'
 
 /** Node/browser-neutral timestamp. */
@@ -149,6 +150,9 @@ export default class LingeyeStore extends Service {
     this.dispatched = new Map()
     this.autoAttempts = new Map()
     this.dispatchTimer = undefined
+    this.publishTimers = new Map()
+    this.publishQueues = new Map()
+    this.publishModule = undefined
     ctx.effect(() => async () => {
       const pending = this.domainPromise
       this.domainPromise = undefined
@@ -157,11 +161,69 @@ export default class LingeyeStore extends Service {
       this.counters.clear()
       this.dispatched.clear()
       this.autoAttempts.clear()
+      for (const timer of this.publishTimers.values()) clearTimeout(timer)
+      this.publishTimers.clear()
       if (pending !== undefined) await (await pending).close()
     }, 'lingeye:domain')
     registerProjection(ctx)
     if (this.autoDispatch) {
       ctx.inject(['agents', 'subagents'], scope => this.startDispatcher(scope))
+    }
+  }
+
+  /**
+   * Coalesce write bursts into one publish. The projection folds the record;
+   * no model turn or client fetch is involved.
+   * @param sessionId - session whose state changed.
+   */
+  schedulePublish(sessionId) {
+    if (this.publishTimers.has(sessionId)) return
+    const timer = setTimeout(() => {
+      this.publishTimers.delete(sessionId)
+      void this.publishState(sessionId)
+    }, 250)
+    this.publishTimers.set(sessionId, timer)
+  }
+
+  /**
+   * Serialize publish attempts for one session so a slow snapshot cannot land
+   * an older state after a newer one.
+   * @param sessionId - session whose state changed.
+   * @returns the queued attempt.
+   */
+  publishState(sessionId) {
+    const previous = this.publishQueues.get(sessionId) ?? Promise.resolve()
+    const current = previous.then(
+      () => this.publishLatest(sessionId),
+      () => this.publishLatest(sessionId),
+    )
+    this.publishQueues.set(sessionId, current.then(() => undefined, () => undefined))
+    return current
+  }
+
+  /**
+   * Append one whole-state plugin record to the live session log.
+   * @param sessionId - session whose state changed.
+   */
+  async publishLatest(sessionId) {
+    const session = this.ctx.sessions.get(sessionId)
+    if (session === undefined) return
+    try {
+      const state = await this.snapshot(sessionId)
+      if (state.engagement === null) return
+      const payload = cleanRecordPayload({
+        ...state,
+        counts: this.summarise(state),
+        report: buildReport(state),
+        initialized: true,
+        updatedAt: now(),
+      })
+      if (payload === undefined) return
+      this.publishModule ??= import('@deepseek-ai/dsh-session')
+      const { appendPluginRecord } = await this.publishModule
+      appendPluginRecord(session, 'plugin:lingeye/state', payload)
+    } catch (error) {
+      this.ctx.logger?.warn(`lingeye state publish failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -325,6 +387,10 @@ export default class LingeyeStore extends Service {
     const current = previous.then(operation)
     const settled = current.then(() => undefined, () => undefined)
     this.sessionQueues.set(sessionId, settled)
+    current.then(
+      () => this.schedulePublish(sessionId),
+      () => undefined,
+    )
     return current
   }
 
