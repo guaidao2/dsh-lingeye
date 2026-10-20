@@ -113,6 +113,8 @@ SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace-path>)
 
 这是上游已知问题（DSH 0.1.7+ 的 Windows ACL 沙箱：非系统盘目录默认没有当前用户 FullControl，沙箱打 Low 完整性标签需要 WRITE_OWNER）。灵眼**内置了社区修复**：`vendor/acl-sandbox-patch` 来自 [dsh-acl-sandbox-patch](https://github.com/masknull/dsh-acl-sandbox-patch)（MIT，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。它不改任何系统 ACL，只在进程内包装沙箱自己的 FFI 调用：严格路径失败时降级为 DACL-only，并在降级环境跳过子进程降完整性。
 
+补丁运行文件会复制到 `$DSH_HOME/lingeye-acl-patch/`，`NODE_OPTIONS` 指向那里的稳定 bootstrap；升级或卸载插件不会让子进程指向已删除的包路径。卸载后重启 DSH 才会清掉进程里残留的 `NODE_OPTIONS`。
+
 Windows 上默认启用；如需关闭，在 profile patch 里覆盖该行：
 
 ```yaml
