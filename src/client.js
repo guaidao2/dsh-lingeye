@@ -213,29 +213,38 @@ window.__ModuleLoader__.load({
     /** Layered DAG view of the exploration chain; the list stays available. */
     function ExplorationGraph({ data }) {
       const containerRef = React.useRef(null)
-      React.useEffect(() => {
-        const element = containerRef.current
-        if (element !== null) element.scrollTop = 0
-      }, [])
+      const svgRef = React.useRef(null)
+      const dragRef = React.useRef(null)
+      const [view, setView] = React.useState({ x: 0, y: 20, scale: 1 })
+      const toUserPoint = (clientX, clientY) => {
+        const svg = svgRef.current
+        if (svg === null || typeof svg.getScreenCTM !== 'function') return undefined
+        const matrix = svg.getScreenCTM()
+        if (matrix === null) return undefined
+        const point = svg.createSVGPoint()
+        point.x = clientX
+        point.y = clientY
+        return point.matrixTransform(matrix.inverse())
+      }
       const goals = data.goals || []
       const goalNodes = goals.length > 0
         ? goals.map(goal => ({ id: goal.id, kind: 'goal', label: goal.text || (data.engagement && data.engagement.target) || '目标' }))
         : [{ id: 'goal-1', kind: 'goal', label: (data.engagement && data.engagement.target) || '目标' }]
-      const nodes = [
-        ...goalNodes,
-        ...(data.intents || []).map(intent => {
-          const derived = Array.isArray(intent.derivedFromFactIds) ? intent.derivedFromFactIds : []
-          return {
-            id: intent.id,
-            kind: 'intent',
-            label: intent.title,
-            suffix: derived.length === 0 ? '' : ` · 派生 ${derived[0]}${derived.length > 1 ? ` +${derived.length - 1}` : ''}`,
-            state: intent.state,
-          }
-        }),
-        ...(data.facts || []).map(fact => ({ id: fact.id, kind: 'fact', label: fact.detail, basis: fact.basis })),
-        ...(data.findings || []).map(finding => ({ id: finding.id, kind: 'finding', label: finding.title, severity: finding.severity })),
-      ]
+      const intentNodes = (data.intents || []).map(intent => {
+        const derived = Array.isArray(intent.derivedFromFactIds) ? intent.derivedFromFactIds : []
+        return {
+          id: intent.id,
+          kind: 'intent',
+          label: intent.title,
+          state: intent.state,
+          derived: derived.length === 0 ? '' : `派生 ${derived[0]}${derived.length > 1 ? ` +${derived.length - 1}` : ''}`,
+        }
+      })
+      const leafNodes = [
+        ...(data.facts || []).map(fact => ({ id: fact.id, kind: 'fact', label: fact.detail, basis: fact.basis, confidence: fact.confidence, intentId: fact.intentId })),
+        ...(data.findings || []).map(finding => ({ id: finding.id, kind: 'finding', label: finding.title, severity: finding.severity, intentId: finding.intentId })),
+      ].sort((a, b) => String(a.intentId || '').localeCompare(String(b.intentId || '')) || idNum(a) - idNum(b))
+      const nodes = [...goalNodes, ...intentNodes, ...leafNodes]
       const byId = new Map(nodes.map(node => [node.id, node]))
       const links = []
       const seen = new Set()
@@ -253,73 +262,182 @@ window.__ModuleLoader__.load({
       for (const fact of data.facts || []) if (fact.intentId) addLink(fact.intentId, fact.id, 'yields')
       for (const finding of data.findings || []) if (finding.intentId) addLink(finding.intentId, finding.id, 'proves')
 
-      const goalColumn = nodes.filter(node => node.kind === 'goal')
-      const intentNodes = nodes.filter(node => node.kind === 'intent')
-      const leafNodes = nodes.filter(node => node.kind !== 'goal' && node.kind !== 'intent')
-      const columns = [goalColumn, intentNodes, leafNodes]
-      const rowHeight = 64
-      const columnWidth = 245
-      const height = Math.max(220, Math.max(1, ...columns.map(column => column.length)) * rowHeight + 30)
-      const width = columnWidth * columns.length + 30
+      const columns = [goalNodes, intentNodes, leafNodes]
+      const rowHeight = 86
+      const columnWidth = 285
+      const height = Math.max(240, Math.max(1, ...columns.map(column => column.length)) * rowHeight + 40)
+      const width = columnWidth * columns.length + 40
       const positions = new Map()
       columns.forEach((column, columnIndex) => {
         column.forEach((node, index) => {
-          positions.set(node.id, { x: 20 + columnIndex * columnWidth, y: 20 + index * rowHeight })
+          positions.set(node.id, { x: 20 + columnIndex * columnWidth, y: 40 + index * rowHeight })
         })
       })
+      React.useEffect(() => {
+        const element = containerRef.current
+        if (element === null) return
+        if (typeof element.scrollTo === 'function') element.scrollTo({ top: 0 })
+      }, [])
+      const MIN_SCALE = 0.08
+      const MAX_SCALE = 2.6
+      const zoomAt = (userX, userY, factor) => {
+        setView(current => {
+          const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, current.scale * factor))
+          const ratio = scale / current.scale
+          return {
+            scale,
+            x: userX - (userX - current.x) * ratio,
+            y: userY - (userY - current.y) * ratio,
+          }
+        })
+      }
+      const fitAll = () => {
+        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min((width - 40) / width, (560 - 40) / height, 1)))
+        setView({ scale, x: (width - width * scale) / 2, y: (560 - height * scale) / 2 })
+      }
+      React.useEffect(() => {
+        const svg = svgRef.current
+        if (svg === null) return undefined
+        const onWheel = (event) => {
+          event.preventDefault()
+          const point = toUserPoint(event.clientX, event.clientY)
+          if (point === undefined) return
+          zoomAt(point.x, point.y, event.deltaY < 0 ? 1.12 : 1 / 1.12)
+        }
+        svg.addEventListener('wheel', onWheel, { passive: false })
+        return () => svg.removeEventListener('wheel', onWheel)
+      }, [])
+      const KIND_LABEL = { goal: '目标', intent: '意图', fact: '事实', finding: '漏洞' }
       const fillOf = (node) => {
         if (node.kind === 'goal') return C.brand
         if (node.kind === 'intent') return node.state === 'done' ? C.success : node.state === 'blocked' ? C.error : C.info
         if (node.kind === 'finding') return C.error
         return BASIS_COLOR[node.basis] || C.muted
       }
-      const short = (text, suffix = '') => {
-        // Keep the derivations visible without letting the suffix overflow a
-        // 180px node: 16 CJK-ish columns, suffix first, title takes the rest.
-        const tail = String(suffix || '').slice(0, 14)
-        const limit = Math.max(4, 16 - tail.length)
-        const value = String(text || '')
-        return `${value.length > limit ? `${value.slice(0, limit - 1)}…` : value}${tail}`
+      const subOf = (node) => {
+        if (node.kind === 'goal') return (data.engagement && data.engagement.target) || '起点'
+        if (node.kind === 'intent') return node.derived || node.state || ''
+        if (node.kind === 'fact') return `${node.basis} · ${Math.round((Number(node.confidence) || 0) * 100)}%`
+        return node.severity || ''
       }
+      const clip = (text, limit = 21) => {
+        const value = String(text || '')
+        return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
+      }
+      const EDGE_COLOR = { spawns: C.info, yields: C.success, proves: C.error }
+      const EDGE_MARKER = { spawns: 'lingeye-arrow-info', yields: 'lingeye-arrow-success', proves: 'lingeye-arrow-error' }
+      const marker = (id, color) => h('marker', {
+        id,
+        viewBox: '0 0 10 10',
+        refX: 9,
+        refY: 5,
+        markerWidth: 6,
+        markerHeight: 6,
+        orient: 'auto-start-reverse',
+      }, h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color }))
       if (nodes.length === 1 && links.length === 0) return h('p', { style: S.faint }, '（还没有探索节点）')
-      return h('div', {
-        ref: containerRef,
-        style: { overflow: 'auto', maxHeight: '520px', border: C.border, borderRadius: '8px', background: C.layer2 },
-      },
+      const legend = [
+        ['目标', C.brand], ['意图', C.info], ['事实（按依据）', C.muted], ['漏洞', C.error],
+      ].map(([label, color]) => h('span', { key: label, style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: color, display: 'inline-block' } }),
+        label))
+      return h('div', { style: { display: 'grid', gap: '8px' } },
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', fontSize: '11px', color: C.faint } },
+          legend,
+          h('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+            h('span', { style: { marginRight: '6px' } }, '拖动平移 · 滚轮缩放'),
+            h('button', { type: 'button', style: S.button, onClick: () => zoomAt(width / 2, 280, 1.15) }, '+'),
+            h('button', { type: 'button', style: S.button, onClick: () => zoomAt(width / 2, 280, 1 / 1.15) }, '−'),
+            h('button', { type: 'button', style: S.button, onClick: fitAll }, '适应'))),
+        h('div', {
+          ref: containerRef,
+          style: {
+            overflow: 'hidden',
+            height: '560px',
+            border: C.border,
+            borderRadius: '10px',
+            background: C.layer2,
+            backgroundImage: 'radial-gradient(rgba(127,127,127,.18) 1px, transparent 1px)',
+            backgroundSize: '18px 18px',
+          },
+        },
         h('svg', {
-          viewBox: `0 0 ${width} ${height}`,
-          style: { display: 'block', width: '100%', minWidth: `${width}px`, height: 'auto' },
+          ref: svgRef,
+          viewBox: `0 0 ${width} 560`,
+          style: { display: 'block', width: '100%', height: '560px', touchAction: 'none', cursor: 'grab' },
           role: 'img',
           'aria-label': '灵眼探索链路图',
+          onPointerDown: (event) => {
+            if (event.button !== 0) return
+            const point = toUserPoint(event.clientX, event.clientY)
+            if (point === undefined) return
+            dragRef.current = { point, ox: view.x, oy: view.y }
+            event.currentTarget.setPointerCapture(event.pointerId)
+          },
+          onPointerMove: (event) => {
+            const drag = dragRef.current
+            if (drag === null) return
+            const point = toUserPoint(event.clientX, event.clientY)
+            if (point === undefined) return
+            setView(current => ({
+              ...current,
+              x: drag.ox + (point.x - drag.point.x),
+              y: drag.oy + (point.y - drag.point.y),
+            }))
+          },
+          onPointerUp: () => { dragRef.current = null },
+          onPointerLeave: () => { dragRef.current = null },
         },
-        links.map((link, index) => {
-          const from = positions.get(link.srcId)
-          const to = positions.get(link.dstId)
-          if (!from || !to) return null
-          return h('line', {
-            key: `edge-${index}`,
-            x1: from.x + 180,
-            y1: from.y + 22,
-            x2: to.x,
-            y2: to.y + 22,
-            stroke: C.faint,
-            'stroke-width': 1,
-          })
-        }),
-        nodes.map(node => {
-          const point = positions.get(node.id)
-          if (!point) return null
-          return h('g', { key: node.id, transform: `translate(${point.x},${point.y})` },
-            h('rect', { width: 180, height: 44, rx: 8, fill: C.layer, stroke: fillOf(node), 'stroke-width': 1.5 }),
-            h('text', { x: 10, y: 17, fill: C.faint, fontSize: 10 }, `${node.kind} · ${node.id}`),
-            h('text', { x: 10, y: 33, fill: C.text, fontSize: 11 }, short(node.label, node.suffix)))
-        }),
-      ))
+        h('defs', null,
+          marker('lingeye-arrow-info', C.info),
+          marker('lingeye-arrow-success', C.success),
+          marker('lingeye-arrow-error', C.error)),
+        h('g', { transform: `translate(${view.x} ${view.y}) scale(${view.scale})` },
+          links.map((link, index) => {
+            const from = positions.get(link.srcId)
+            const to = positions.get(link.dstId)
+            if (!from || !to) return null
+            const x1 = from.x + 206
+            const y1 = from.y + 33
+            const x2 = to.x - 3
+            const y2 = to.y + 33
+            const mid = (x1 + x2) / 2
+            return h('path', {
+              key: `edge-${index}`,
+              d: `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`,
+              fill: 'none',
+              stroke: EDGE_COLOR[link.kind] || C.faint,
+              'stroke-width': 1.3,
+              'stroke-linecap': 'round',
+              opacity: 0.7,
+              'marker-end': `url(#${EDGE_MARKER[link.kind] || 'lingeye-arrow-info'})`,
+            })
+          }),
+          nodes.map(node => {
+            const point = positions.get(node.id)
+            if (!point) return null
+            const color = fillOf(node)
+            return h('g', { key: node.id, transform: `translate(${point.x},${point.y})` },
+              h('rect', { width: 206, height: 66, rx: 10, fill: C.layer, stroke: C.border, 'stroke-width': 1 }),
+              h('rect', { x: 0, y: 0, width: 4, height: 66, rx: 2, fill: color }),
+              h('circle', { cx: 193, cy: 14, r: 3, fill: color }),
+              h('text', { x: 14, y: 17, fill: C.faint, fontSize: 10 }, `${KIND_LABEL[node.kind]} · ${node.id}`),
+              h('text', { x: 14, y: 37, fill: C.text, fontSize: 12, fontWeight: 600 }, clip(node.label, 13)),
+              h('text', { x: 14, y: 54, fill: C.muted, fontSize: 10 }, clip(subOf(node), 17)))
+          }),
+        ))))
     }
 
     function Explore({ data }) {
       const [mode, setMode] = React.useState('list')
       const intents = [...(data.intents || [])].sort((a, b) => idNum(a) - idNum(b))
+      const showGraph = () => {
+        setMode('graph')
+        requestAnimationFrame(() => {
+          const root = document.querySelector('[data-testid="lingeye-view"]')
+          if (root !== null && typeof root.scrollTo === 'function') root.scrollTo({ top: 0 })
+        })
+      }
       const toggle = h('div', { style: { display: 'flex', gap: '4px' } },
         h('button', {
           type: 'button',
@@ -329,7 +447,7 @@ window.__ModuleLoader__.load({
         h('button', {
           type: 'button',
           style: mode === 'graph' ? { ...S.tab, ...S.tabActive } : S.tab,
-          onClick: () => setMode('graph'),
+          onClick: showGraph,
         }, '图'))
       if (mode === 'graph') return card('探索链路', h(ExplorationGraph, { data }), toggle)
       if (intents.length === 0) return card('探索链路', h('p', { style: S.faint }, '（还没有意图）'), toggle)
