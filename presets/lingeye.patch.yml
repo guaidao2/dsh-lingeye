@@ -17,7 +17,7 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: lingeye-worker
-        name: 灵眼执行
+        name: 灵眼执行（子 agent）
         description: 灵眼的授权安全测试执行子 agent：只做被委派的一条意图，结果用 ly_submit 写回父会话。
         order: 11
         plugins:
@@ -59,7 +59,7 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: lingeye-retest
-        name: 灵眼复测
+        name: 灵眼复测（子 agent）
         description: 灵眼的漏洞复测子 agent：按原始复现步骤验证一个漏洞，结论与证据写回复测记录。
         order: 12
         plugins:
