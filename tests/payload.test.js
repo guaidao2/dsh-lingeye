@@ -21,9 +21,10 @@ test('undefined array entries are dropped instead of becoming null', () => {
 })
 
 test('evidence bodies are capped for the durable record', () => {
-  const clean = cleanRecordPayload({ evidence: [{ id: 'evidence-1', content: 'x'.repeat(1000) }] })
+  const clean = cleanRecordPayload({ evidence: [{ id: 'evidence-1', content: 'x'.repeat(1000), size: 1000 }] })
   assert.equal(clean.evidence[0].content.length, 801)
   assert.ok(clean.evidence[0].content.endsWith('…'))
+  assert.equal(clean.evidence[0].size, clean.evidence[0].content.length)
 })
 
 test('non-finite numbers are rejected instead of being rewritten', () => {

@@ -24,7 +24,7 @@ import {
   EDGE_KINDS,
 } from './spec.js'
 import { registerProjection } from './projection.js'
-import { cleanRecordPayload } from './payload.js'
+import { cleanRecordPayload, trimProjectionState } from './payload.js'
 import { buildReport, buildExportBundle } from './report.js'
 
 /** Node/browser-neutral timestamp. */
@@ -154,6 +154,7 @@ export default class LingeyeStore extends Service {
     this.publishQueues = new Map()
     this.publishRetries = new Map()
     this.retryTimers = new Map()
+    this.publishedPayloads = new Map()
     this.publishModule = undefined
     ctx.effect(() => async () => {
       const pending = this.domainPromise
@@ -169,6 +170,7 @@ export default class LingeyeStore extends Service {
       this.retryTimers.clear()
       this.publishQueues.clear()
       this.publishRetries.clear()
+      this.publishedPayloads.clear()
       if (pending !== undefined) await (await pending).close()
     }, 'lingeye:domain')
     registerProjection(ctx)
@@ -184,6 +186,11 @@ export default class LingeyeStore extends Service {
    */
   schedulePublish(sessionId) {
     if (this.publishTimers.has(sessionId)) return
+    const retry = this.retryTimers.get(sessionId)
+    if (retry !== undefined) {
+      clearTimeout(retry)
+      this.retryTimers.delete(sessionId)
+    }
     const timer = setTimeout(() => {
       this.publishTimers.delete(sessionId)
       void this.publishState(sessionId)
@@ -203,7 +210,11 @@ export default class LingeyeStore extends Service {
       () => this.publishLatest(sessionId),
       () => this.publishLatest(sessionId),
     )
-    this.publishQueues.set(sessionId, current.then(() => undefined, () => undefined))
+    const settled = current.then(() => undefined, () => undefined)
+    this.publishQueues.set(sessionId, settled)
+    settled.then(() => {
+      if (this.publishQueues.get(sessionId) === settled) this.publishQueues.delete(sessionId)
+    })
     return current
   }
 
@@ -215,25 +226,29 @@ export default class LingeyeStore extends Service {
     const session = this.ctx.sessions.get(sessionId)
     if (session === undefined) return
     try {
-      const state = await this.snapshot(sessionId)
+      const state = await this.enqueue(sessionId, () => this.snapshot(sessionId), false)
       if (state.engagement === null) return
+      const trimmed = trimProjectionState(state)
       const payload = cleanRecordPayload({
-        ...state,
-        counts: this.summarise(state),
-        report: buildReport(state),
+        ...trimmed,
+        counts: this.summarise(trimmed),
+        report: buildReport(trimmed),
         initialized: true,
-        updatedAt: now(),
       })
       if (payload === undefined) {
         this.ctx.logger?.warn('lingeye state publish skipped: snapshot is not JSON-serializable')
         return
       }
+      const serialized = JSON.stringify(payload)
+      if (this.publishedPayloads.get(sessionId) === serialized) return
+      payload.updatedAt = now()
       this.publishModule ??= import('@deepseek-ai/dsh-session')
       this.publishModule.catch(() => {
         this.publishModule = undefined
       })
       const { appendPluginRecord } = await this.publishModule
       appendPluginRecord(session, 'plugin:lingeye/state', payload)
+      this.publishedPayloads.set(sessionId, serialized)
       this.publishRetries.delete(sessionId)
       const retry = this.retryTimers.get(sessionId)
       if (retry !== undefined) {
@@ -409,15 +424,17 @@ export default class LingeyeStore extends Service {
   }
 
   /** Serialize one read/allocate/write transaction for a session. */
-  enqueue(sessionId, operation) {
+  enqueue(sessionId, operation, publish = true) {
     const previous = this.sessionQueues.get(sessionId) ?? Promise.resolve()
     const current = previous.then(operation)
     const settled = current.then(() => undefined, () => undefined)
     this.sessionQueues.set(sessionId, settled)
-    current.then(
-      () => this.schedulePublish(sessionId),
-      () => undefined,
-    )
+    if (publish) {
+      current.then(
+        () => this.schedulePublish(sessionId),
+        () => undefined,
+      )
+    }
     return current
   }
 
@@ -543,6 +560,13 @@ export default class LingeyeStore extends Service {
     return this.enqueue(sessionId, async () => {
       await this.clearSession(sessionId)
       this.dispatched.delete(sessionId)
+      this.publishedPayloads.delete(sessionId)
+      this.publishRetries.delete(sessionId)
+      const resetRetry = this.retryTimers.get(sessionId)
+      if (resetRetry !== undefined) {
+        clearTimeout(resetRetry)
+        this.retryTimers.delete(sessionId)
+      }
       for (const key of [...this.autoAttempts.keys()]) {
         if (key.startsWith(`${sessionId}:`)) this.autoAttempts.delete(key)
       }

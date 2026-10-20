@@ -48,23 +48,30 @@ function walk(value, seen) {
 }
 
 /**
+ * Trim heavy fields for the live projection without changing stored data.
+ * Evidence bodies are capped and `size` is rewritten to the capped character
+ * count so the report and the tab agree.
+ * @param state - engagement snapshot.
+ * @returns state with trimmed evidence bodies.
+ */
+export function trimProjectionState(state) {
+  if (!Array.isArray(state.evidence)) return state
+  return {
+    ...state,
+    evidence: state.evidence.map(evidence => {
+      if (typeof evidence.content !== 'string' || evidence.content.length <= EVIDENCE_CONTENT_LIMIT) return evidence
+      const content = `${evidence.content.slice(0, EVIDENCE_CONTENT_LIMIT)}…`
+      return { ...evidence, content, size: content.length }
+    }),
+  }
+}
+
+/**
  * @param state - engagement snapshot.
  * @returns a record-safe payload with trimmed evidence bodies.
  */
 export function cleanRecordPayload(state) {
-  const projection = {
-    ...state,
-    ...(Array.isArray(state.evidence)
-      ? {
-          evidence: state.evidence.map(evidence => ({
-            ...evidence,
-            content: typeof evidence.content === 'string' && evidence.content.length > EVIDENCE_CONTENT_LIMIT
-              ? `${evidence.content.slice(0, EVIDENCE_CONTENT_LIMIT)}…`
-              : evidence.content,
-          })),
-        }
-      : {}),
-  }
+  const projection = trimProjectionState(state)
   try {
     return walk(projection, new WeakSet())
   } catch {

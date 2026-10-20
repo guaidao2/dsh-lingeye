@@ -47,7 +47,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.1.0.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.1.3.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。
@@ -56,7 +56,7 @@ dsh plugin --profile web add ./dsh-lingeye-0.1.0.tgz
 
 只选「灵眼渗透测试模式」。
 
-「灵眼执行（子 agent）」和「灵眼复测（子 agent）」是给指挥官内部派发用的子 agent 预设，手动开这类会话拿不到完整的指挥、探索与报告流程。DSH 目前没有隐藏预设的字段，所以三个预设都会出现在选择菜单里；我们只能用名称标明它们的用途。等上游支持隐藏后会把这两个收起来。
+「灵眼执行（子 agent）」和「灵眼复测（子 agent）」是给指挥官内部派发用的子 agent 预设，手动开这类会话拿不到完整的指挥、探索与报告流程。DSH 目前没有隐藏预设的字段，所以三个预设都会出现在选择菜单里；我们只能用名称标明它们的用途。
 
 ## 开始一次测试
 

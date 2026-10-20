@@ -223,7 +223,16 @@ window.__ModuleLoader__.load({
         : [{ id: 'goal-1', kind: 'goal', label: (data.engagement && data.engagement.target) || '目标' }]
       const nodes = [
         ...goalNodes,
-        ...(data.intents || []).map(intent => ({ id: intent.id, kind: 'intent', label: intent.title, state: intent.state })),
+        ...(data.intents || []).map(intent => {
+          const derived = Array.isArray(intent.derivedFromFactIds) ? intent.derivedFromFactIds : []
+          return {
+            id: intent.id,
+            kind: 'intent',
+            label: intent.title,
+            suffix: derived.length === 0 ? '' : ` · 派生 ${derived[0]}${derived.length > 1 ? ` +${derived.length - 1}` : ''}`,
+            state: intent.state,
+          }
+        }),
         ...(data.facts || []).map(fact => ({ id: fact.id, kind: 'fact', label: fact.detail, basis: fact.basis })),
         ...(data.findings || []).map(finding => ({ id: finding.id, kind: 'finding', label: finding.title, severity: finding.severity })),
       ]
@@ -238,7 +247,7 @@ window.__ModuleLoader__.load({
         links.push({ srcId, dstId, kind })
       }
       for (const edge of data.edges || []) {
-        if (['spawns', 'derived_from', 'yields', 'proves'].includes(edge.kind)) addLink(edge.srcId, edge.dstId, edge.kind)
+        if (['spawns', 'yields', 'proves'].includes(edge.kind)) addLink(edge.srcId, edge.dstId, edge.kind)
       }
       for (const intent of data.intents || []) if (intent.goalId) addLink(intent.goalId, intent.id, 'spawns')
       for (const fact of data.facts || []) if (fact.intentId) addLink(fact.intentId, fact.id, 'yields')
@@ -264,10 +273,13 @@ window.__ModuleLoader__.load({
         if (node.kind === 'finding') return C.error
         return BASIS_COLOR[node.basis] || C.muted
       }
-      const strokeOf = (link) => link.kind === 'derived_from' ? C.warn : C.faint
-      const short = text => {
+      const short = (text, suffix = '') => {
+        // Keep the derivations visible without letting the suffix overflow a
+        // 180px node: 16 CJK-ish columns, suffix first, title takes the rest.
+        const tail = String(suffix || '').slice(0, 14)
+        const limit = Math.max(4, 16 - tail.length)
         const value = String(text || '')
-        return value.length > 26 ? `${value.slice(0, 25)}…` : value
+        return `${value.length > limit ? `${value.slice(0, limit - 1)}…` : value}${tail}`
       }
       if (nodes.length === 1 && links.length === 0) return h('p', { style: S.faint }, '（还没有探索节点）')
       return h('div', {
@@ -290,7 +302,7 @@ window.__ModuleLoader__.load({
             y1: from.y + 22,
             x2: to.x,
             y2: to.y + 22,
-            stroke: strokeOf(link),
+            stroke: C.faint,
             'stroke-width': 1,
           })
         }),
@@ -300,7 +312,7 @@ window.__ModuleLoader__.load({
           return h('g', { key: node.id, transform: `translate(${point.x},${point.y})` },
             h('rect', { width: 180, height: 44, rx: 8, fill: C.layer, stroke: fillOf(node), 'stroke-width': 1.5 }),
             h('text', { x: 10, y: 17, fill: C.faint, fontSize: 10 }, `${node.kind} · ${node.id}`),
-            h('text', { x: 10, y: 33, fill: C.text, fontSize: 11 }, short(node.label)))
+            h('text', { x: 10, y: 33, fill: C.text, fontSize: 11 }, short(node.label, node.suffix)))
         }),
       ))
     }
