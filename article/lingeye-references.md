@@ -4,7 +4,7 @@
 
 ## 一、FakeAGI：本项目的思想来源与对照实验
 
-- **FakeAGI 总论文**，guaidao2，玄幕安全团队。  
+- **FakeAGI 总论文**，guaidao2（个人项目）。  
   https://github.com/guaidao2/FakeAGI/blob/main/PAPER.md  
   相关：自维持假设、预测误差、十一条公理、生长/修剪、概念与符号。本文借的是“智能作为持续预测与修正过程”的视角，不借“自我保存作为 agent 目标”。
 
