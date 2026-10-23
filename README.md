@@ -12,13 +12,15 @@
 
 - **探索图是 DAG-MDP 的信念状态**：goal → intent → fact → 新 intent → finding；事实带 basis（observed / inferred / assumed / negative）与置信度，否定结论和假设都保留。
 - **意图是实验**：每条意图写清预期观测；利用动作同时是信息动作；失败落 negative 事实，不静默丢弃。
-- **信息增益参与排序**：`ly_next` 按依赖就绪、优先级、覆盖缺口与信念缺口给出前沿，而不是待办清单。
+- **依赖门控与优先级排序**：`ly_next` 按依赖就绪、优先级、运行状态和资产数给出前沿，并单独返回信念缺口；信息增益尚未进入排序，不要把它当成已实现的求解器。
 - **交付物是一等公民**：漏洞带可复现步骤、证据、复测历史；报告与证据包可导出。
 - 设计上把源码残留、拼接点、双层解码、token 信任边界都落成一等数据，而不是写在报告里的事后注释。
 
 ## 设计哲学
 
 为什么把渗透测试当成不完全信息博弈，为什么探索图是 DAG-MDP，以及那四条安全经验怎样变成数据结构：见 [article/lingeye-philosophy.md](article/lingeye-philosophy.md)。
+
+认知层面的续篇讨论投影、寻路同构、结构生长/修剪、归纳与证伪、因果一致性：见 [article/lingeye-cognition.md](article/lingeye-cognition.md)。相关论文与文献附注见 [article/lingeye-references.md](article/lingeye-references.md)。
 
 ## 功能
 
@@ -47,7 +49,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.1.4.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.2.0.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。
