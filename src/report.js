@@ -36,6 +36,7 @@ export function buildReport(data) {
   lines.push(
     `- 目标：${engagement.target}`,
     `- 目的：${engagement.objective}`,
+    ...(engagement.projectId ? [`- 项目：${engagement.projectId}`] : []),
     `- 授权：${engagement.authorization === '' ? '（未声明）' : engagement.authorization}`,
     `- 范围：${engagement.scope === '' ? '（未声明）' : engagement.scope}`,
     `- 建立时间：${engagement.createdAt}`,
@@ -51,7 +52,7 @@ export function buildReport(data) {
   lines.push('## 目标与判定', '')
   if (data.goals.length === 0) lines.push('（无）')
   for (const goal of data.goals) {
-    lines.push(`- [${goal.status}] ${goal.text}${goal.vulnclass === '' ? '' : `（${goal.vulnclass}）`}${goal.evidenceIds.length === 0 ? '' : ` 证据: ${goal.evidenceIds.join(', ')}`}`)
+    lines.push(`- [${goal.status}] ${goal.text}${goal.vulnclass === '' ? '' : `（${goal.vulnclass}）`}${goal.acceptance === '' ? '' : ` 验收: ${goal.acceptance}`}${goal.evidenceIds.length === 0 ? '' : ` 证据: ${goal.evidenceIds.join(', ')}`}`)
   }
   lines.push('')
 

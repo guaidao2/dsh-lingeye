@@ -25,6 +25,8 @@
 ## 功能
 
 - 探索链路：目标、意图、事实、漏洞、提示、约束、攻击路径。
+- 项目聚合（可选）：用 `projectId` 把同一项目的多个会话关联起来，侧栏「灵眼项目」只读汇总意图、事实、漏洞、资产与会话入口；数据仍由各会话写入。
+- 角色化子 agent：执行、复测、情报、枚举、威胁建模五类子 agent 预设，指挥官按需要派发；编排仍由 DSH 提供。
 - 资产图与覆盖率：资产按类型归一化去重；只有 finding 或带证据的事实才算"已测"。
 - 证据：命令 / HTTP / 文本 / 文件，记录观测信道与逐层解释，正文按 sha256 内容寻址。
 - 数据流：记录 source → transform → sink 的拼接点。
@@ -49,7 +51,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.2.0.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.3.0.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。
@@ -58,7 +60,7 @@ dsh plugin --profile web add ./dsh-lingeye-0.2.0.tgz
 
 只选「灵眼渗透测试模式」。
 
-「灵眼执行（子 agent）」和「灵眼复测（子 agent）」是给指挥官内部派发用的子 agent 预设，手动开这类会话拿不到完整的指挥、探索与报告流程。DSH 目前没有隐藏预设的字段，所以三个预设都会出现在选择菜单里；我们只能用名称标明它们的用途。
+「灵眼执行（子 agent）」「灵眼复测（子 agent）」「灵眼情报（子 agent）」「灵眼枚举（子 agent）」「灵眼威胁建模（子 agent）」是给指挥官内部派发用的子 agent 预设，手动开这类会话拿不到完整的指挥、探索与报告流程。DSH 目前没有隐藏预设的字段，所以这些预设都会出现在选择菜单里；我们只能用名称标明它们的用途。
 
 子 agent 的会话（包括从父会话打开的详细模式）里，灵眼页签没有数据是预期边界，不是数据丢失：页签按会话绑定交战，子 agent 会话本身没有指挥官面板和 engagement，所以没有可展示的记录；回到父会话看面板即可。这是已知问题，不需要清数据或重建会话。
 
@@ -78,7 +80,8 @@ dsh plugin --profile web add ./dsh-lingeye-0.2.0.tgz
 
 | 工具 | 作用 |
 | --- | --- |
-| `ly_start` | 建立/重置交战：目标、目的、授权、范围、约束 |
+| `ly_start` | 建立/重置交战：目标、目的、授权、范围、约束、可选 projectId |
+| `ly_project_link` | 把当前交战关联到项目分组（只改分组键，不移动数据） |
 | `ly_state` / `ly_next` | 读取完整状态 / 态势、前沿与信念缺口 |
 | `ly_goal_add` / `ly_goal_prove` | 目标与达成判定 |
 | `ly_intent_add` / `ly_intent_update` | 批量建意图（最多 4 条）/ 改意图状态 |
@@ -90,6 +93,8 @@ dsh plugin --profile web add ./dsh-lingeye-0.2.0.tgz
 | `ly_dispatch_status` / `ly_dispatch_now` | 查看/手动运行宿主调度器 |
 
 执行子 agent（`lingeye-worker` 预设）：`ly_fetch`、`ly_submit`、`ly_asset_add`、`ly_trace_append`。
+
+角色子 agent（`lingeye-intel` / `lingeye-enumerator` / `lingeye-threat-modeler` 预设）复用同一组 worker 工具，只收窄 persona 与工作重点；委派时仍要给出真实父 intentId。
 
 复测子 agent（`lingeye-retest` 预设）：`ly_retest_begin`、`ly_retest_finish`。
 

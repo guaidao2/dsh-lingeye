@@ -47,6 +47,9 @@ const iso = z.string().min(1)
 export const engagementSchema = z.object({
   id,
   sessionId: id,
+  // Optional explicit project grouping. Empty means this session is its own
+  // project; old rows need no migration and keep their previous behavior.
+  projectId: z.string().default(''),
   target: z.string().min(1),
   objective: z.string().min(1),
   authorization: z.string().default(''),
@@ -59,6 +62,7 @@ export const goalSchema = z.object({
   id,
   sessionId: id,
   text: z.string().min(1),
+  acceptance: z.string().default(''),
   vulnclass: z.string().default(''),
   status: z.enum(GOAL_STATES).default('open'),
   evidenceIds: z.array(id).default([]),

@@ -573,6 +573,7 @@ export default class LingeyeStore extends Service {
       const engagement = {
         id: 'eng-1',
         sessionId,
+        projectId: String(input.projectId ?? '').trim(),
         target: required(input.target, 'target'),
         objective: required(input.objective, 'objective'),
         authorization: input.authorization ?? '',
@@ -610,6 +611,18 @@ export default class LingeyeStore extends Service {
     })
   }
 
+  /** Attach the current engagement to a project grouping without moving data. */
+  async linkProject(sessionId, projectId) {
+    return this.enqueue(sessionId, async () => {
+      const engagement = await this.engagement(sessionId)
+      if (engagement === undefined) throw new Error('engagement is not initialized; call ly_start first')
+      const next = { ...engagement, projectId: String(projectId ?? '').trim() }
+      const domain = await this.domain()
+      await domain.table('engagements').put(sessionId, next)
+      return next
+    })
+  }
+
   /** Add one goal. */
   async addGoal(sessionId, input) {
     return this.enqueue(sessionId, async () => {
@@ -620,6 +633,7 @@ export default class LingeyeStore extends Service {
         id,
         sessionId,
         text: required(input.text, 'goal text'),
+        acceptance: String(input.acceptance ?? '').trim(),
         vulnclass: input.vulnclass ?? '',
         status: 'open',
         evidenceIds: [],

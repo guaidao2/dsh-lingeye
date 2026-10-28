@@ -1,16 +1,19 @@
 # dsh-lingeye agent presets.
 #
-# Three presets share one storage domain (owned by the top-level
+# Six presets share one storage domain (owned by the top-level
 # `dsh-lingeye/store` row) and differ only in the model-facing tool surface:
-#   lingeye         commander / planner (human-facing session)
-#   lingeye-worker  execution subagent (one intent per delegation)
-#   lingeye-retest  retest subagent (one finding per delegation)
+#   lingeye                commander / planner (human-facing session)
+#   lingeye-worker         execution subagent (one intent per delegation)
+#   lingeye-retest         retest subagent (one finding per delegation)
+#   lingeye-intel          public/context intelligence subagent
+#   lingeye-enumerator     authorized recon/enumeration subagent
+#   lingeye-threat-modeler attack-path/threat-model subagent
 #
 # The commander's delegation rows select lingeye-worker by default and expose
-# lingeye-retest through `allowedAgentPresets`.
+# the other roles through `allowedAgentPresets`.
 #
-# Worker and retest presets are inserted BEFORE the commander so the
-# delegation tool can read their preset documents when it mounts.
+# All subagent presets are inserted BEFORE the commander so the delegation
+# tool can read their preset documents when it mounts.
 
 - insert:
     - id: preset-lingeye-worker
@@ -91,6 +94,118 @@
           - id: lingeye-retest
             name: 'dsh-lingeye/retest'
 
+    - id: preset-lingeye-intel
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lingeye-intel
+        name: 灵眼情报（子 agent）
+        description: 灵眼的情报子 agent：做公开信息、业务与关联目标梳理，把可复核的情报写回父会话。
+        order: 13
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是「灵眼」的情报子 agent，不是指挥官。你只做被委派的一条情报/背景梳理：
+                公开信息、业务线索、关联目标与可复核的来源。不要主动扫描或利用目标，不创建目标或意图，
+                不臆造证据；所有结论用 ly_submit 写回父会话并标明来源。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: lingeye-worker
+            name: 'dsh-lingeye/worker'
+
+    - id: preset-lingeye-enumerator
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lingeye-enumerator
+        name: 灵眼枚举（子 agent）
+        description: 灵眼的枚举子 agent：在授权范围内做主被动信息收集与暴露面枚举，证据写回父会话。
+        order: 14
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是「灵眼」的枚举子 agent，不是指挥官。你只执行被委派的一条枚举意图：
+                在授权范围内收集端口、服务、路径、技术与暴露面信息，每一条结论都尽量绑定可复核证据。
+                不扩大范围、不做利用、不破坏目标，不创建目标或意图；结果用 ly_submit 写回父会话。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: lingeye-worker
+            name: 'dsh-lingeye/worker'
+
+    - id: preset-lingeye-threat-modeler
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lingeye-threat-modeler
+        name: 灵眼威胁建模（子 agent）
+        description: 灵眼的威胁建模子 agent：把情报与枚举转成攻击路径和脆弱点模型，不做利用。
+        order: 15
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是「灵眼」的威胁建模子 agent，不是指挥官。你只做被委派的一条建模意图：
+                把已有情报/事实转成攻击路径、前置条件与待验证假设，明确哪些是 observed、哪些是 inferred。
+                不做利用、不发起攻击、不扩展授权范围，不创建目标或意图；模型与依据用 ly_submit 写回父会话。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: lingeye-worker
+            name: 'dsh-lingeye/worker'
+
     - id: preset-lingeye
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -168,6 +283,9 @@
                   allowedAgentPresets:
                     - lingeye-worker
                     - lingeye-retest
+                    - lingeye-intel
+                    - lingeye-enumerator
+                    - lingeye-threat-modeler
                   modelSelectionSettings: true
               - id: workflow-ptc
                 name: '@deepseek-ai/dsh-workflow-ptc'

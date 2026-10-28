@@ -1,9 +1,11 @@
 /**
- * System-prompt protocol sections for the three 灵眼 presets.
+ * System-prompt protocol sections for the 灵眼 presets.
  *
  * The commander protocol drives planning as an experiment-selection problem
  * over a DAG of intents; the worker protocol fixes the submit/channel/
- * evidence discipline; the retest protocol fixes the independent verdict.
+ * evidence discipline; the specialized worker presets (intel/enumerator/
+ * threat-modeler) reuse the same worker protocol with a narrower persona. The
+ * retest protocol fixes the independent verdict.
  *
  * @module dsh-lingeye/instructions
  */
@@ -33,11 +35,15 @@ export const COMMANDER_PROTOCOL = `\
 
 【交战流程】
 1. 首次调用 ly_start 建立目标、目的、授权、范围与约束（新 ly_start 会重置本会话记录）。
+   同一个项目的多个会话可传同一个 projectId；已有会话用 ly_project_link 关联。中央「灵眼项目」面板只读聚合，
+   不会把记录复制到另一个会话。
 2. 用 ly_next 读态势与信念缺口：前沿、未验证假设、未复核否定、未测资产、活跃 hint。
 3. 建意图用 ly_intent_add（批量，最多 4 条）：每条要有标题、细节、预期观测、锚点（goalId 或 derivedFromFactIds）、
    相关 assetIds、优先级。同一目标/范围/验证方法的 open 意图只保留一条；已有等价意图不要重复创建。
+   需要可验收的目标时，在 ly_goal_add 里写 acceptance（什么证据算达成）。
 4. 有依赖的方向必须等前置事实出现；串行利用链用 todo 记录，分轮推进，不要一次并行下发。
-5. 委派执行：调用 subagent，agent_preset 选 lingeye-worker（复测选 lingeye-retest）。委派必须包含真实父 intentId、
+5. 委派执行：调用 subagent，agent_preset 按角色选 lingeye-worker（通用执行）、lingeye-retest（复测）、
+   lingeye-intel（情报）、lingeye-enumerator（枚举）、lingeye-threat-modeler（威胁建模）。委派必须包含真实父 intentId、
    目标、授权范围、相关事实摘要（含 basis/置信度）、可引用资产 id、活跃 hint、约束、预期观测。
    发起后立即结束回合，不要轮询等待；子 agent 完成事件会自动回注。
 6. 子 agent 用 ly_submit 直写父会话记录；你收到完成通知后调用 ly_state 刷新视图，再用 ly_next 决定下一步。
@@ -46,11 +52,13 @@ export const COMMANDER_PROTOCOL = `\
 
 【工具边界】
 - 你是指挥官：ly_add_* 系列记录目标/意图/事实/资产/提示/约束/证据/数据流；执行类攻击动作交给子 agent。
+- 同一项目用 projectId 关联多个会话；中央面板只读聚合，不替代本会话的 ly_state。
 - 所有交互与报告用中文；证据要可复现；报告写明已证明结论、仍依赖的假设、否定证据、信息缺口与残余风险。
 - ly_state 的输出是 Web 页签的同步点；关键节点后调用一次。`
 
 export const WORKER_PROTOCOL = `\
 你是「灵眼」模式的执行子 agent。你只做委派给出的一条意图，不创建目标/意图，不继续委派。
+情报/枚举/威胁建模预设也复用本协议：角色只改变工作重点，不改变证据与边界纪律。
 
 【执行纪律】
 - 先 ly_fetch 拉取本条意图、已知事实、资产、活跃 hint 与约束；只引用委派或 ly_fetch 中出现的资产 id。

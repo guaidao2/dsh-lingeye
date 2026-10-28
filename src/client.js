@@ -22,11 +22,13 @@ window.__ModuleLoader__.load({
       tab: '灵眼',
       empty: '灵眼渗透测试模式尚未开始：在会话里调用 ly_start 建立本次测试。',
       loading: '正在加载灵眼记录…',
+      projects: '灵眼项目',
     }
     const en = {
       tab: 'Lingeye',
       empty: 'The Lingeye pentest mode has not started: call ly_start in this session.',
       loading: 'Loading Lingeye records…',
+      projects: 'Lingeye projects',
     }
 
     /* ---------------------------------------------------------------- colors */
@@ -164,6 +166,7 @@ window.__ModuleLoader__.load({
         card('交战',
           h('div', { style: S.grid },
             kv('目标', engagement.target), kv('目的', engagement.objective),
+            engagement.projectId ? kv('项目', engagement.projectId) : null,
             kv('授权', engagement.authorization), kv('范围', engagement.scope),
             kv('状态', engagement.status), kv('建立时间', engagement.createdAt))),
         card('计数',
@@ -180,7 +183,8 @@ window.__ModuleLoader__.load({
         card('目标',
           (data.goals || []).length === 0 ? h('p', { style: S.faint }, '（无）') : h('ul', { style: S.list },
             (data.goals || []).map(goal => h('li', { key: goal.id, style: S.item },
-              h('div', { style: S.itemHead }, badge(goal.status, STATE_COLOR[goal.status]), h('span', { style: S.itemTitle }, goal.text)))))),
+              h('div', { style: S.itemHead }, badge(goal.status, STATE_COLOR[goal.status]), h('span', { style: S.itemTitle }, goal.text)),
+              goal.acceptance ? h('p', { style: S.faint }, `验收：${goal.acceptance}`) : null)))),
         card('信念缺口',
           h('div', { style: { display: 'grid', gap: '8px' } },
             h('div', null,
@@ -210,26 +214,19 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** Layered DAG view of the exploration chain; the list stays available. */
-    function ExplorationGraph({ data }) {
-      const containerRef = React.useRef(null)
-      const svgRef = React.useRef(null)
-      const dragRef = React.useRef(null)
-      const [view, setView] = React.useState({ x: 0, y: 20, scale: 1 })
-      const toUserPoint = (clientX, clientY) => {
-        const svg = svgRef.current
-        if (svg === null || typeof svg.getScreenCTM !== 'function') return undefined
-        const matrix = svg.getScreenCTM()
-        if (matrix === null) return undefined
-        const point = svg.createSVGPoint()
-        point.x = clientX
-        point.y = clientY
-        return point.matrixTransform(matrix.inverse())
-      }
+    const GRAPH_NODE_W = 232
+    const GRAPH_NODE_H = 84
+
+    /**
+     * Build the exploration graph model: seeded columns for a sane first
+     * guess, then a small force simulation so related evidence pulls together
+     * instead of sitting in rigid rows.
+     */
+    function buildExplorationGraph(data) {
       const goals = data.goals || []
       const goalNodes = goals.length > 0
-        ? goals.map(goal => ({ id: goal.id, kind: 'goal', label: goal.text || (data.engagement && data.engagement.target) || '目标' }))
-        : [{ id: 'goal-1', kind: 'goal', label: (data.engagement && data.engagement.target) || '目标' }]
+        ? goals.map(goal => ({ id: goal.id, kind: 'goal', label: goal.text || (data.engagement && data.engagement.target) || '目标', state: goal.status }))
+        : [{ id: 'goal-1', kind: 'goal', label: (data.engagement && data.engagement.target) || '目标', state: 'open' }]
       const intentNodes = (data.intents || []).map(intent => {
         const derived = Array.isArray(intent.derivedFromFactIds) ? intent.derivedFromFactIds : []
         return {
@@ -263,21 +260,91 @@ window.__ModuleLoader__.load({
       for (const finding of data.findings || []) if (finding.intentId) addLink(finding.intentId, finding.id, 'proves')
 
       const columns = [goalNodes, intentNodes, leafNodes]
-      const rowHeight = 86
-      const columnWidth = 285
-      const height = Math.max(240, Math.max(1, ...columns.map(column => column.length)) * rowHeight + 40)
-      const width = columnWidth * columns.length + 40
-      const positions = new Map()
       columns.forEach((column, columnIndex) => {
         column.forEach((node, index) => {
-          positions.set(node.id, { x: 20 + columnIndex * columnWidth, y: 40 + index * rowHeight })
+          node.x = 80 + columnIndex * 360
+          node.y = 80 + index * 110
+          node.w = GRAPH_NODE_W
+          node.h = GRAPH_NODE_H
         })
       })
-      React.useEffect(() => {
-        const element = containerRef.current
-        if (element === null) return
-        if (typeof element.scrollTo === 'function') element.scrollTo({ top: 0 })
-      }, [])
+
+      const byNode = new Map(nodes.map(node => [node.id, node]))
+      const linkPairs = links.map(link => [byNode.get(link.srcId), byNode.get(link.dstId)]).filter(pair => pair[0] && pair[1])
+      const iterations = nodes.length > 80 ? 100 : 180
+      for (let step = 0; step < iterations; step += 1) {
+        const fx = new Map()
+        const fy = new Map()
+        const addForce = (id, x, y) => {
+          fx.set(id, (fx.get(id) || 0) + x)
+          fy.set(id, (fy.get(id) || 0) + y)
+        }
+        for (let i = 0; i < nodes.length; i += 1) {
+          const a = nodes[i]
+          for (let j = i + 1; j < nodes.length; j += 1) {
+            const b = nodes[j]
+            let dx = (b.x + b.w / 2) - (a.x + a.w / 2)
+            let dy = (b.y + b.h / 2) - (a.y + a.h / 2)
+            let dist = Math.hypot(dx, dy)
+            if (dist < 1) { dx = 1; dy = 1; dist = Math.SQRT2 }
+            const minDist = 300
+            const push = Math.min(18, (minDist * minDist) / (dist * dist) * 0.8)
+            addForce(a.id, (-dx / dist) * push, (-dy / dist) * push)
+            addForce(b.id, (dx / dist) * push, (dy / dist) * push)
+          }
+        }
+        for (const [a, b] of linkPairs) {
+          const dx = (b.x + b.w / 2) - (a.x + a.w / 2)
+          const dy = (b.y + b.h / 2) - (a.y + a.h / 2)
+          const dist = Math.hypot(dx, dy) || 1
+          const pull = Math.min(8, Math.max(-8, (dist - 380) * 0.005))
+          addForce(a.id, (dx / dist) * pull, (dy / dist) * pull)
+          addForce(b.id, (-dx / dist) * pull, (-dy / dist) * pull)
+        }
+        const avgX = nodes.reduce((sum, n) => sum + n.x + n.w / 2, 0) / Math.max(1, nodes.length)
+        const avgY = nodes.reduce((sum, n) => sum + n.y + n.h / 2, 0) / Math.max(1, nodes.length)
+        for (const node of nodes) {
+          const fxx = (fx.get(node.id) || 0) + (avgX - (node.x + node.w / 2)) * 0.002
+          const fyy = (fy.get(node.id) || 0) + (avgY - (node.y + node.h / 2)) * 0.002
+          node.x += Math.max(-10, Math.min(10, fxx))
+          node.y += Math.max(-10, Math.min(10, fyy))
+        }
+      }
+      const minX = Math.min(...nodes.map(node => node.x))
+      const minY = Math.min(...nodes.map(node => node.y))
+      for (const node of nodes) {
+        node.x -= minX
+        node.y -= minY
+      }
+      const contentW = Math.max(1, ...nodes.map(node => node.x + node.w)) + 60
+      const contentH = Math.max(1, ...nodes.map(node => node.y + node.h)) + 60
+      return { nodes, links, byId, contentW, contentH, viewWidth: Math.max(960, contentW) }
+    }
+
+    /** Interactive force-directed view of the exploration chain. */
+    function ExplorationGraph({ data }) {
+      const model = React.useMemo(() => buildExplorationGraph(data), [data])
+      const { nodes, links, byId, contentW, contentH, viewWidth } = model
+      const graphSignature = nodes.map(node => node.id).join(',')
+      const fittedRef = React.useRef('')
+      const containerRef = React.useRef(null)
+      const svgRef = React.useRef(null)
+      const outerRef = React.useRef(null)
+      const fullButtonRef = React.useRef(null)
+      const dragRef = React.useRef(null)
+      const [view, setView] = React.useState({ x: 0, y: 20, scale: 1 })
+      const [selectedId, setSelectedId] = React.useState(null)
+      const [fullscreen, setFullscreen] = React.useState(false)
+      const toUserPoint = (clientX, clientY) => {
+        const svg = svgRef.current
+        if (svg === null || typeof svg.getScreenCTM !== 'function') return undefined
+        const matrix = svg.getScreenCTM()
+        if (matrix === null) return undefined
+        const point = svg.createSVGPoint()
+        point.x = clientX
+        point.y = clientY
+        return point.matrixTransform(matrix.inverse())
+      }
       const MIN_SCALE = 0.08
       const MAX_SCALE = 2.6
       const zoomAt = (userX, userY, factor) => {
@@ -292,21 +359,67 @@ window.__ModuleLoader__.load({
         })
       }
       const fitAll = () => {
-        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min((width - 40) / width, (560 - 40) / height, 1)))
-        setView({ scale, x: (width - width * scale) / 2, y: (560 - height * scale) / 2 })
+        // The viewBox height is always 560 user units; CSS scaling handles the
+        // fullscreen viewport, so fitting must never mix in CSS pixels.
+        const viewportHeight = 560
+        const rawScale = Math.min((viewWidth - 60) / contentW, (viewportHeight - 60) / contentH, 1.1)
+        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, rawScale))
+        setView({ scale, x: (viewWidth - contentW * scale) / 2, y: (viewportHeight - contentH * scale) / 2 })
       }
+      /** Readable first view: fit width, allow vertical pan for dense graphs. */
+      const fitReadable = () => {
+        const scale = Math.min(MAX_SCALE, Math.max(0.55, Math.min((viewWidth - 60) / contentW, 1.1)))
+        setView({ scale, x: (viewWidth - contentW * scale) / 2, y: 20 })
+      }
+      React.useEffect(() => {
+        if (fittedRef.current === graphSignature && !fullscreen) return
+        fittedRef.current = graphSignature
+        if (fullscreen) fitAll()
+        else fitReadable()
+      }, [graphSignature, fullscreen])
+      React.useEffect(() => {
+        if (!fullscreen) return undefined
+        const focusables = () => {
+          if (outerRef.current === null) return []
+          return [...outerRef.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+            .filter(element => !element.disabled && element.getAttribute('aria-hidden') !== 'true')
+        }
+        const initial = focusables()
+        if (initial.length > 0) initial[0].focus()
+        else if (outerRef.current !== null) outerRef.current.focus()
+        const onKey = event => {
+          if (event.key === 'Escape') setFullscreen(false)
+          if (event.key !== 'Tab' || outerRef.current === null) return
+          const items = focusables()
+          if (items.length === 0) return
+          const first = items[0]
+          const last = items[items.length - 1]
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === outerRef.current)) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first.focus()
+          }
+        }
+        window.addEventListener('keydown', onKey)
+        return () => {
+          window.removeEventListener('keydown', onKey)
+          if (fullButtonRef.current !== null) fullButtonRef.current.focus()
+        }
+      }, [fullscreen])
       React.useEffect(() => {
         const svg = svgRef.current
         if (svg === null) return undefined
-        const onWheel = (event) => {
+        const onWheel = event => {
           event.preventDefault()
           const point = toUserPoint(event.clientX, event.clientY)
           if (point === undefined) return
-          zoomAt(point.x, point.y, event.deltaY < 0 ? 1.12 : 1 / 1.12)
+          zoomAt(point.x, point.y, event.deltaY < 0 ? 1.1 : 1 / 1.1)
         }
         svg.addEventListener('wheel', onWheel, { passive: false })
         return () => svg.removeEventListener('wheel', onWheel)
-      }, [])
+      }, [fullscreen])
       const KIND_LABEL = { goal: '目标', intent: '意图', fact: '事实', finding: '漏洞' }
       const fillOf = (node) => {
         if (node.kind === 'goal') return C.brand
@@ -320,70 +433,89 @@ window.__ModuleLoader__.load({
         if (node.kind === 'fact') return `${node.basis} · ${Math.round((Number(node.confidence) || 0) * 100)}%`
         return node.severity || ''
       }
-      const clip = (text, limit = 21) => {
-        const value = String(text || '')
-        return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
-      }
       const EDGE_COLOR = { spawns: C.info, yields: C.success, proves: C.error }
       const EDGE_MARKER = { spawns: 'lingeye-arrow-info', yields: 'lingeye-arrow-success', proves: 'lingeye-arrow-error' }
       const marker = (id, color) => h('marker', {
-        id,
-        viewBox: '0 0 10 10',
-        refX: 9,
-        refY: 5,
-        markerWidth: 6,
-        markerHeight: 6,
-        orient: 'auto-start-reverse',
+        id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse',
       }, h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color }))
-      if (nodes.length === 1 && links.length === 0) return h('p', { style: S.faint }, '（还没有探索节点）')
+      const edgeOffsets = new Map()
+      const outCounts = new Map()
+      for (const link of links) {
+        const key = `${link.srcId}>${link.dstId}`
+        const out = outCounts.get(link.srcId) || 0
+        outCounts.set(link.srcId, out + 1)
+        edgeOffsets.set(key, out)
+      }
+      const outTotals = new Map()
+      for (const link of links) outTotals.set(link.srcId, (outTotals.get(link.srcId) || 0) + 1)
+      const selectedNode = selectedId ? byId.get(selectedId) : undefined
+      const selectedLinks = selectedId ? links.filter(link => link.srcId === selectedId || link.dstId === selectedId) : []
+      const detailFields = (node) => {
+        if (node === undefined) return []
+        const raw = node.kind === 'intent'
+          ? (data.intents || []).find(item => item.id === node.id)
+          : node.kind === 'fact'
+            ? (data.facts || []).find(item => item.id === node.id)
+            : node.kind === 'finding'
+              ? (data.findings || []).find(item => item.id === node.id)
+              : (data.goals || []).find(item => item.id === node.id)
+        if (raw === undefined) return []
+        const fields = []
+        for (const [label, key] of [['状态', 'state'], ['优先级', 'priority'], ['依据', 'basis'], ['置信度', 'confidence'], ['严重度', 'severity'], ['类型', 'vulnclass'], ['验收', 'acceptance'], ['预期观测', 'expectedObservation'], ['复现步骤', 'reproducibleSteps'], ['证据', 'evidenceIds'], ['信任边界', 'trustBoundary']]) {
+          const value = raw[key]
+          if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) continue
+          fields.push([label, Array.isArray(value) ? value.join('、') : String(value)])
+        }
+        return fields.slice(0, 8)
+      }
       const legend = [
         ['目标', C.brand], ['意图', C.info], ['事实（按依据）', C.muted], ['漏洞', C.error],
       ].map(([label, color]) => h('span', { key: label, style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
-        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: color, display: 'inline-block' } }),
-        label))
-      return h('div', { style: { display: 'grid', gap: '8px' } },
-        h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', fontSize: '11px', color: C.faint } },
-          legend,
-          h('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' } },
-            h('span', { style: { marginRight: '6px' } }, '拖动平移 · 滚轮缩放'),
-            h('button', { type: 'button', style: S.button, onClick: () => zoomAt(width / 2, 280, 1.15) }, '+'),
-            h('button', { type: 'button', style: S.button, onClick: () => zoomAt(width / 2, 280, 1 / 1.15) }, '−'),
-            h('button', { type: 'button', style: S.button, onClick: fitAll }, '适应'))),
+        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: color, display: 'inline-block' } }), label))
+      const edgeLegend = [
+        ['spawns', '派生'], ['yields', '产出'], ['proves', '证明'],
+      ].map(([kind, label]) => h('span', { key: kind, style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+        h('span', { style: { width: '14px', height: '2px', background: EDGE_COLOR[kind], display: 'inline-block' } }), label))
+      if (nodes.length === 0) return h('p', { style: S.faint }, '（还没有探索节点）')
+      const outerStyle = fullscreen
+        ? { position: 'fixed', inset: 0, zIndex: 60, padding: '14px', background: C.layer2, display: 'grid', gap: '8px', gridTemplateRows: 'auto 1fr' }
+        : { display: 'grid', gap: '8px' }
+      const canvasHeight = fullscreen ? 'calc(100vh - 96px)' : '560px'
+      return h('div', {
+        ref: outerRef,
+        tabIndex: fullscreen ? -1 : undefined,
+        style: outerStyle,
+        role: fullscreen ? 'dialog' : undefined,
+        'aria-modal': fullscreen ? 'true' : undefined,
+        'aria-label': fullscreen ? '灵眼探索图全屏' : undefined,
+      },
         h('div', {
           ref: containerRef,
           style: {
-            overflow: 'hidden',
-            height: '560px',
-            border: C.border,
-            borderRadius: '10px',
-            background: C.layer2,
-            backgroundImage: 'radial-gradient(rgba(127,127,127,.18) 1px, transparent 1px)',
-            backgroundSize: '18px 18px',
+            position: 'relative', overflow: 'hidden', height: canvasHeight,
+            border: fullscreen ? 'none' : C.border, borderRadius: fullscreen ? '0' : '10px', background: C.layer2,
+            backgroundImage: 'radial-gradient(rgba(127,127,127,.18) 1px, transparent 1px)', backgroundSize: '18px 18px',
           },
         },
         h('svg', {
           ref: svgRef,
-          viewBox: `0 0 ${width} 560`,
-          style: { display: 'block', width: '100%', height: '560px', touchAction: 'none', cursor: 'grab' },
-          role: 'img',
-          'aria-label': '灵眼探索链路图',
-          onPointerDown: (event) => {
+          viewBox: `0 0 ${viewWidth} 560`,
+          preserveAspectRatio: 'xMidYMid meet',
+          style: { display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: 'grab' },
+          role: 'group', 'aria-label': '灵眼探索链路图',
+          onPointerDown: event => {
             if (event.button !== 0) return
             const point = toUserPoint(event.clientX, event.clientY)
             if (point === undefined) return
             dragRef.current = { point, ox: view.x, oy: view.y }
             event.currentTarget.setPointerCapture(event.pointerId)
           },
-          onPointerMove: (event) => {
+          onPointerMove: event => {
             const drag = dragRef.current
             if (drag === null) return
             const point = toUserPoint(event.clientX, event.clientY)
             if (point === undefined) return
-            setView(current => ({
-              ...current,
-              x: drag.ox + (point.x - drag.point.x),
-              y: drag.oy + (point.y - drag.point.y),
-            }))
+            setView(current => ({ ...current, x: drag.ox + (point.x - drag.point.x), y: drag.oy + (point.y - drag.point.y) }))
           },
           onPointerUp: () => { dragRef.current = null },
           onPointerLeave: () => { dragRef.current = null },
@@ -394,38 +526,85 @@ window.__ModuleLoader__.load({
           marker('lingeye-arrow-error', C.error)),
         h('g', { transform: `translate(${view.x} ${view.y}) scale(${view.scale})` },
           links.map((link, index) => {
-            const from = positions.get(link.srcId)
-            const to = positions.get(link.dstId)
+            const from = byId.get(link.srcId)
+            const to = byId.get(link.dstId)
             if (!from || !to) return null
-            const x1 = from.x + 206
-            const y1 = from.y + 33
-            const x2 = to.x - 3
-            const y2 = to.y + 33
-            const mid = (x1 + x2) / 2
+            const forward = to.x >= from.x
+            const x1 = forward ? from.x + from.w : from.x
+            const x2 = forward ? to.x - 8 : to.x + to.w + 8
+            const total = outTotals.get(link.srcId) || 1
+            const offset = (edgeOffsets.get(`${link.srcId}>${link.dstId}`) || 0) + 1
+            const y1 = from.y + 14 + (from.h - 28) * (offset / (total + 1))
+            const y2 = to.y + to.h / 2
+            const dx = Math.max(50, Math.abs(x2 - x1) / 2)
             return h('path', {
               key: `edge-${index}`,
-              d: `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`,
-              fill: 'none',
-              stroke: EDGE_COLOR[link.kind] || C.faint,
-              'stroke-width': 1.3,
-              'stroke-linecap': 'round',
-              opacity: 0.7,
+              d: forward ? `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1 - dx},${y1} ${x2 + dx},${y2} ${x2},${y2}`,
+              fill: 'none', stroke: EDGE_COLOR[link.kind] || C.faint, 'stroke-width': 1.4,
+              'stroke-linecap': 'round', opacity: 0.66,
               'marker-end': `url(#${EDGE_MARKER[link.kind] || 'lingeye-arrow-info'})`,
             })
           }),
           nodes.map(node => {
-            const point = positions.get(node.id)
-            if (!point) return null
             const color = fillOf(node)
-            return h('g', { key: node.id, transform: `translate(${point.x},${point.y})` },
-              h('rect', { width: 206, height: 66, rx: 10, fill: C.layer, stroke: C.border, 'stroke-width': 1 }),
-              h('rect', { x: 0, y: 0, width: 4, height: 66, rx: 2, fill: color }),
-              h('circle', { cx: 193, cy: 14, r: 3, fill: color }),
-              h('text', { x: 14, y: 17, fill: C.faint, fontSize: 10 }, `${KIND_LABEL[node.kind]} · ${node.id}`),
-              h('text', { x: 14, y: 37, fill: C.text, fontSize: 12, fontWeight: 600 }, clip(node.label, 13)),
-              h('text', { x: 14, y: 54, fill: C.muted, fontSize: 10 }, clip(subOf(node), 17)))
-          }),
-        ))))
+            const isSelected = selectedId === node.id
+            return h('foreignObject', {
+              key: node.id, x: node.x, y: node.y, width: node.w, height: node.h,
+              style: { overflow: 'visible' },
+              onPointerDown: event => event.stopPropagation(),
+              onClick: event => { event.stopPropagation(); setSelectedId(isSelected ? null : node.id) },
+            },
+            h('div', {
+              role: 'button',
+              tabIndex: 0,
+              'aria-label': `${KIND_LABEL[node.kind] || node.kind} ${node.label || node.id}`,
+              style: {
+                boxSizing: 'border-box', width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
+                justifyContent: 'center', gap: '3px', padding: '8px 12px 8px 16px', cursor: 'pointer',
+                borderRadius: '10px', border: `1px solid ${isSelected ? color : C.border}`,
+                borderLeft: `4px solid ${color}`, background: C.layer,
+                boxShadow: isSelected ? `0 0 0 2px ${color}33` : 'none',
+              },
+              onKeyDown: event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setSelectedId(isSelected ? null : node.id)
+                }
+              },
+            },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', color: C.faint } },
+              h('span', { style: { color, fontWeight: 600 } }, KIND_LABEL[node.kind] || node.kind),
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, node.id)),
+            h('div', { style: { fontSize: '12px', fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, node.label || ''),
+            h('div', { style: { fontSize: '10px', color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, subOf(node))))
+          }))),
+        h('div', { style: { position: 'absolute', left: '10px', top: '10px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', maxWidth: 'calc(100% - 320px)', padding: '5px 8px', borderRadius: '7px', border: C.border, background: C.layer, fontSize: '10px', color: C.faint } },
+          legend, edgeLegend),
+        h('div', { style: { position: 'absolute', right: '10px', bottom: '10px', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px', borderRadius: '7px', border: C.border, background: C.layer } },
+          h('span', { style: { marginRight: '4px', fontSize: '10px', color: C.faint } }, '拖动平移 · 滚轮缩放'),
+          h('button', { type: 'button', style: S.button, onClick: () => zoomAt(viewWidth / 2, 280, 1.15) }, '+'),
+          h('button', { type: 'button', style: S.button, onClick: () => zoomAt(viewWidth / 2, 280, 1 / 1.15) }, '−'),
+          h('button', { type: 'button', style: S.button, onClick: fitAll }, '适应'),
+          h('button', { ref: fullButtonRef, type: 'button', style: S.button, onClick: () => setFullscreen(value => !value) }, fullscreen ? '退出全屏' : '全屏')),
+        selectedNode ? h('div', {
+          role: 'dialog',
+          'aria-label': '节点详情',
+          style: { position: 'absolute', top: '10px', right: '10px', width: '280px', maxHeight: 'calc(100% - 20px)', overflow: 'auto', border: C.border, borderRadius: '10px', background: C.layer, padding: '12px', boxShadow: '0 10px 24px rgba(0,0,0,.2)' },
+        },
+        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' } },
+          h('span', { style: { fontSize: '10px', color: fillOf(selectedNode), fontWeight: 600 } }, `${KIND_LABEL[selectedNode.kind] || selectedNode.kind} · ${selectedNode.id}`),
+          h('button', { type: 'button', style: S.button, onClick: () => setSelectedId(null) }, '关闭')),
+        h('div', { style: { marginTop: '6px', fontSize: '13px', fontWeight: 600, color: C.text } }, selectedNode.label || ''),
+        h('div', { style: { marginTop: '4px', fontSize: '11px', color: C.muted } }, subOf(selectedNode)),
+        detailFields(selectedNode).length > 0 ? h('dl', { style: { margin: '8px 0 0', display: 'grid', gridTemplateColumns: '72px 1fr', gap: '4px 8px', fontSize: '11px' } },
+          detailFields(selectedNode).map(([label, value]) => h(React.Fragment, { key: label },
+            h('dt', { style: { color: C.faint } }, label),
+            h('dd', { style: { margin: 0, color: C.text, overflowWrap: 'anywhere' } }, value)))) : null,
+        h('div', { style: { marginTop: '10px', fontSize: '11px', color: C.faint } }, '关联边'),
+        selectedLinks.length > 0 ? h('div', { style: { display: 'grid', gap: '4px', marginTop: '4px', fontSize: '11px' } },
+          selectedLinks.map((link, index) => h('div', { key: index, style: { color: C.muted } },
+            `${link.kind}: ${link.srcId} → ${link.dstId}`))) : h('div', { style: { marginTop: '4px', fontSize: '11px', color: C.faint } }, '没有关联边。')) : null,
+        links.length === 0 ? h('div', { style: { position: 'absolute', left: '12px', bottom: '12px', fontSize: '11px', color: C.faint } }, '暂无关系边：节点按初始列排布，记录攻击路径后会连起来。') : null))
     }
 
     function Explore({ data }) {
@@ -615,6 +794,107 @@ window.__ModuleLoader__.load({
       { id: 'retests', label: '复测', view: Retests },
     ]
 
+    /** Global panel icon for the project aggregation view. */
+    function LingeyeProjectsIcon({ size, active }) {
+      return h('svg', {
+        width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+        stroke: active ? C.brand : C.muted, strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+      },
+      h('path', { d: 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z' }),
+      h('circle', { cx: 12, cy: 12, r: 2.6 }))
+    }
+
+    /**
+     * Read-only project view: group the Lingeye projections already held by
+     * the session list by `engagement.projectId`. Writes still belong to each
+     * session's commander; this panel never invents a second state store.
+     */
+    function ProjectsPanel(props) {
+      const list = props.useSessions(state => state)
+      const refreshed = React.useRef(false)
+      const lingeyeIds = (list.ids || []).filter(id => {
+        const row = list.byId && list.byId[id]
+        return row !== undefined && isLingeyePreset(presetOf(row))
+      })
+      const refresh = () => {
+        const sessions = clientCtx && clientCtx.sessions
+        if (lingeyeIds.length === 0 || sessions === undefined) return
+        Promise.allSettled(lingeyeIds.map(id => Promise.resolve(sessions.refreshProjections(id))))
+      }
+      React.useEffect(() => {
+        if (refreshed.current || lingeyeIds.length === 0) return
+        refreshed.current = true
+        refresh()
+      }, [lingeyeIds.length])
+      const groups = React.useMemo(() => {
+        const map = new Map()
+        for (const id of lingeyeIds) {
+          const state = list.projectionsBySession && list.projectionsBySession[id]
+          const data = state && state.values && state.values.lingeye
+          if (data === undefined || data === null || data.initialized !== true) continue
+          const projectId = (data.engagement && data.engagement.projectId) || id
+          let group = map.get(projectId)
+          if (group === undefined) {
+            group = {
+              id: projectId,
+              target: (data.engagement && data.engagement.target) || projectId,
+              objective: (data.engagement && data.engagement.objective) || '',
+              sessions: [],
+              latest: 0,
+              intents: 0,
+              facts: 0,
+              assets: 0,
+              findings: 0,
+            }
+            map.set(projectId, group)
+          }
+          const row = list.byId[id]
+          group.sessions.push({ id, title: (row && (row.displayTitle || row.title)) || id })
+          const counts = data.counts || {}
+          group.intents += Number(counts.intents) || 0
+          group.facts += Number(counts.facts) || 0
+          group.assets += (data.assets || []).length
+          group.findings += (data.findings || []).length
+          const stamp = Date.parse(data.updatedAt || '')
+          if (Number.isFinite(stamp)) group.latest = Math.max(group.latest, stamp)
+        }
+        return [...map.values()].sort((a, b) => b.latest - a.latest)
+      }, [list])
+      const open = (sessionId) => {
+        const workspace = clientCtx && clientCtx.uiWorkspace
+        if (workspace && typeof workspace.openSession === 'function') workspace.openSession(sessionId)
+      }
+      return h('div', { style: { ...S.root, maxWidth: '1120px', margin: '0 auto' } },
+        h('header', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' } },
+          h('div', null,
+            h('h1', { style: { margin: 0, fontSize: '20px' } }, props.t ? props.t('projects') : '灵眼项目'),
+            h('p', { style: { margin: '4px 0 0', color: C.muted, fontSize: '12px' } }, `按 projectId 聚合的只读视图；仅读取 ${lingeyeIds.length} 个灵眼会话，数据仍由各会话的指挥官写入。`)),
+          h('button', { type: 'button', style: S.button, onClick: refresh }, '刷新')),
+        groups.length === 0
+          ? h('div', { style: S.card }, h('p', { style: S.faint }, '还没有可聚合的灵眼项目。先在灵眼会话里调用 ly_start，并用 projectId 把同一项目的多个会话关联起来。'))
+          : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' } },
+            groups.map(group => h('section', { key: group.id, style: S.card },
+              h('div', { style: S.itemHead },
+                h('span', { style: S.itemTitle }, group.target),
+                h('span', { style: S.faint }, group.id)),
+              group.objective ? h('p', { style: S.detail }, group.objective) : null,
+              h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } },
+                badge(`${group.sessions.length} 会话`, C.muted),
+                badge(`${group.intents} 意图`, C.muted),
+                badge(`${group.facts} 事实`, C.muted),
+                badge(`${group.findings} 漏洞`, group.findings > 0 ? C.error : C.muted),
+                badge(`${group.assets} 资产`, C.muted)),
+              h('div', { style: { display: 'grid', gap: '4px', marginTop: '10px' } },
+                group.sessions.map(session => h('button', {
+                  key: session.id, type: 'button',
+                  style: { ...S.button, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                  onClick: () => open(session.id),
+                }, session.title))),
+              group.latest > 0 ? h('div', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } }, `最近写入：${new Date(group.latest).toLocaleString()}`) : null)))
+      )
+    }
+
     function LingeyeView(props) {
       const projection = props.useProjection ? props.useProjection('lingeye') : undefined
       const [tab, setTab] = React.useState('overview')
@@ -689,8 +969,8 @@ window.__ModuleLoader__.load({
       return retained ? retained[0] : undefined
     }
 
-    /** Required client services for the mode gate and the tab. */
-    const inject = ['slots', 'locale', 'sessions']
+    /** Required client services for the mode gate, the tab and the project panel. */
+    const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']
 
     /**
      * Register the 灵眼 tab only for sessions composed from the mode.
@@ -731,6 +1011,18 @@ window.__ModuleLoader__.load({
           if (disposeEntry) disposeEntry()
         }
       })
+      ctx.slots.inject('main', () => ctx.slots.register({
+        name: 'main',
+        key: 'lingeye-projects',
+        locale: NS,
+      }, ProjectsPanel))
+      ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+        name: 'sidebar.panellist',
+        id: 'lingeye-projects',
+        order: 30,
+        locale: NS,
+        label: () => t('projects'),
+      }, LingeyeProjectsIcon))
     }
 
     exports.apply = apply

@@ -61,6 +61,7 @@ export function registerCommander(ctx) {
     parameters: {
       target: { type: 'string', required: true, description: 'Target host, URL, network scope, or repository path.' },
       objective: { type: 'string', required: true, description: 'What must be delivered or proven for this engagement.' },
+      projectId: { type: 'string', description: 'Optional project grouping key shared with other sessions; omit to keep this session as its own project.' },
       authorization: { type: 'string', description: 'Declarative authorization note (who authorized, written-permission reference).' },
       scope: { type: 'string', description: 'Declared scope, e.g. domains/IPs the engagement may touch.' },
       constraints: {
@@ -82,6 +83,17 @@ export function registerCommander(ctx) {
       const state = await store.start(sessionIdOf(exec), args)
       return { initialized: true, counts: store.summarise(state), ...state }
     },
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_project_link',
+    description: 'Attach this engagement to a project grouping so the central Lingeye projects panel can aggregate multiple sessions. This only changes the grouping key; it does not move or copy records. Pass an empty projectId to unlink.',
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Project grouping key, or an empty string to unlink.' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    presentResult: card('灵眼项目关联'),
+    execute: async (args, exec) => store.linkProject(sessionIdOf(exec), args.projectId),
   }))
 
   ctx.tools.register(tool({
@@ -139,6 +151,7 @@ export function registerCommander(ctx) {
     description: 'Add one goal (a final, independently verifiable deliverable) to the engagement.',
     parameters: {
       text: { type: 'string', required: true, description: 'The goal text.' },
+      acceptance: { type: 'string', description: 'Optional acceptance criteria: what evidence makes this goal met.' },
       vulnclass: { type: 'string', description: 'Optional vulnerability class this goal targets.' },
     },
     output: { schema: objectOutput, render: lineRender('目标已记录：') },

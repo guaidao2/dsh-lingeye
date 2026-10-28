@@ -1,6 +1,6 @@
 {
   "name": "dsh-lingeye",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "灵眼：DeepSeek Harness 的授权安全测试工作台插件（探索黑板、资产与漏洞交付物、复测与报告）。",
   "author": "guaidao2 & coolmoon",
   "type": "module",
@@ -54,8 +54,12 @@
     },
     "client": {
       "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ],
       "platform": "web"
     }
