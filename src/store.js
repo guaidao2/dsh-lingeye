@@ -249,6 +249,11 @@ export default class LingeyeStore extends Service {
       const { appendPluginRecord } = await this.publishModule
       appendPluginRecord(session, 'plugin:lingeye/state', payload)
       this.publishedPayloads.set(sessionId, serialized)
+      try {
+        await this.pruneProjectTombstones(sessionId, state.engagement?.projectId ?? '')
+      } catch (error) {
+        this.ctx.logger?.warn(`lingeye tombstone prune failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
       this.publishRetries.delete(sessionId)
       const retry = this.retryTimers.get(sessionId)
       if (retry !== undefined) {
@@ -510,6 +515,8 @@ export default class LingeyeStore extends Service {
     }
     data.edges = await this.rows(sessionId, 'edges')
     data.attackPaths = await this.rows(sessionId, TABLE_OF.path)
+    const tombstones = await this.domain()
+    data.projectTombstones = [...tombstones.table('project_tombstones').entries()].map(([, row]) => ({ sessionId: row.sessionId, projectId: row.projectId }))
     data.engagement = engagement ?? null
     return data
   }
@@ -583,6 +590,7 @@ export default class LingeyeStore extends Service {
       }
       const domain = await this.domain()
       await domain.table('engagements').put(sessionId, engagement)
+      if (engagement.projectId !== '') await domain.table('project_tombstones').delete(`${sessionId}:${engagement.projectId}`)
       const goalId = await this.nextId(sessionId, 'goal')
       await domain.table('goals').put(recordKey(sessionId, goalId), {
         id: goalId,
@@ -619,8 +627,52 @@ export default class LingeyeStore extends Service {
       const next = { ...engagement, projectId: String(projectId ?? '').trim() }
       const domain = await this.domain()
       await domain.table('engagements').put(sessionId, next)
+      if (next.projectId !== '') await domain.table('project_tombstones').delete(`${sessionId}:${next.projectId}`)
       return next
     })
+  }
+
+  /** Session ids currently attached to one project grouping. */
+  async projectSessionIds(projectId) {
+    const target = String(projectId ?? '').trim()
+    if (target === '') return []
+    const domain = await this.domain()
+    const ids = []
+    for (const [, engagement] of domain.table('engagements').entries()) {
+      if (engagement.projectId === target) ids.push(engagement.sessionId)
+    }
+    return ids
+  }
+
+  /** Remove the grouping key from every session in one project; data is kept. */
+  async unlinkProject(projectId, callerSessionId) {
+    const target = String(projectId ?? '').trim()
+    if (target === '') throw new Error('projectId is required')
+    const caller = callerSessionId === undefined ? undefined : await this.engagement(callerSessionId)
+    if (caller === undefined || caller.projectId !== target) {
+      throw new Error('only a session linked to this project can unlink it')
+    }
+    const ids = await this.projectSessionIds(target)
+    const domain = await this.domain()
+    for (const sessionId of ids) {
+      const key = `${sessionId}:${target}`
+      await domain.table('project_tombstones').put(key, { id: key, sessionId, projectId: target, createdAt: now() })
+      await this.enqueue(sessionId, async () => {
+        const engagement = await this.engagement(sessionId)
+        if (engagement === undefined) return
+        await domain.table('engagements').put(sessionId, { ...engagement, projectId: '' })
+      })
+    }
+    return { projectId: target, sessions: ids.length }
+  }
+
+  /** Drop tombstones once this session's published state reflects the new projectId. */
+  async pruneProjectTombstones(sessionId, currentProjectId) {
+    const domain = await this.domain()
+    const table = domain.table('project_tombstones')
+    for (const [key, row] of table.entries()) {
+      if (row.sessionId === sessionId && row.projectId !== currentProjectId) await table.delete(key)
+    }
   }
 
   /** Add one goal. */

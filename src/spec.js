@@ -230,6 +230,14 @@ export const attackPathSchema = z.object({
   createdAt: iso,
 })
 
+/** A tombstone for an unlinked project grouping, so cold projections can hide it. */
+export const projectTombstoneSchema = z.object({
+  id,
+  sessionId: id,
+  projectId: z.string().min(1),
+  createdAt: iso,
+})
+
 /** The whole 灵眼 domain. */
 export const lingeyeDomainSpec = defineDomain({
   name: 'lingeye',
@@ -249,5 +257,6 @@ export const lingeyeDomainSpec = defineDomain({
     retests: domainTable(retestSchema),
     constraints: domainTable(constraintSchema),
     attack_paths: domainTable(attackPathSchema),
+    project_tombstones: domainTable(projectTombstoneSchema),
   },
 })

@@ -36,7 +36,7 @@ export function buildReport(data) {
   lines.push(
     `- 目标：${engagement.target}`,
     `- 目的：${engagement.objective}`,
-    ...(engagement.projectId ? [`- 项目：${engagement.projectId}`] : []),
+    ...(engagement.projectId && !(data.projectTombstones || []).some(item => item.sessionId === engagement.sessionId && item.projectId === engagement.projectId) ? [`- 项目：${engagement.projectId}`] : []),
     `- 授权：${engagement.authorization === '' ? '（未声明）' : engagement.authorization}`,
     `- 范围：${engagement.scope === '' ? '（未声明）' : engagement.scope}`,
     `- 建立时间：${engagement.createdAt}`,

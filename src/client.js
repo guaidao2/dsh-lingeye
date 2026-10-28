@@ -148,7 +148,7 @@ window.__ModuleLoader__.load({
 
     /* ------------------------------------------------------------ sub views */
 
-    function Overview({ data }) {
+    function Overview({ data, sessionId }) {
       const engagement = data.engagement || {}
       const counts = data.counts || {}
       const tested = testedAssetIds(data)
@@ -161,12 +161,14 @@ window.__ModuleLoader__.load({
       const untested = assets.filter(asset => !tested.has(asset.id))
       const hints = (data.hints || []).filter(hint => hint.state === 'active')
       const activity = (data.activity || []).slice(-6).reverse()
+      const projectId = engagement.projectId
+      const projectTombstoned = projectId !== undefined && (data.projectTombstones || []).some(item => item.sessionId === sessionId && item.projectId === projectId)
 
       return h('div', { style: { display: 'grid', gap: '12px' } },
         card('交战',
           h('div', { style: S.grid },
             kv('目标', engagement.target), kv('目的', engagement.objective),
-            engagement.projectId ? kv('项目', engagement.projectId) : null,
+            engagement.projectId && !projectTombstoned ? kv('项目', engagement.projectId) : null,
             kv('授权', engagement.authorization), kv('范围', engagement.scope),
             kv('状态', engagement.status), kv('建立时间', engagement.createdAt))),
         card('计数',
@@ -478,8 +480,8 @@ window.__ModuleLoader__.load({
         h('span', { style: { width: '14px', height: '2px', background: EDGE_COLOR[kind], display: 'inline-block' } }), label))
       if (nodes.length === 0) return h('p', { style: S.faint }, '（还没有探索节点）')
       const outerStyle = fullscreen
-        ? { position: 'fixed', inset: 0, zIndex: 60, padding: '14px', background: C.layer2, display: 'grid', gap: '8px', gridTemplateRows: 'auto 1fr' }
-        : { display: 'grid', gap: '8px' }
+        ? { position: 'fixed', inset: 0, zIndex: 60, padding: '14px', background: C.layer2, display: 'grid', gap: '8px', gridTemplateRows: 'auto 1fr', userSelect: 'none', WebkitUserSelect: 'none' }
+        : { display: 'grid', gap: '8px', userSelect: 'none', WebkitUserSelect: 'none' }
       const canvasHeight = fullscreen ? 'calc(100vh - 96px)' : '560px'
       return h('div', {
         ref: outerRef,
@@ -488,6 +490,7 @@ window.__ModuleLoader__.load({
         role: fullscreen ? 'dialog' : undefined,
         'aria-modal': fullscreen ? 'true' : undefined,
         'aria-label': fullscreen ? '灵眼探索图全屏' : undefined,
+        onDragStart: event => event.preventDefault(),
       },
         h('div', {
           ref: containerRef,
@@ -564,6 +567,7 @@ window.__ModuleLoader__.load({
                 borderRadius: '10px', border: `1px solid ${isSelected ? color : C.border}`,
                 borderLeft: `4px solid ${color}`, background: C.layer,
                 boxShadow: isSelected ? `0 0 0 2px ${color}33` : 'none',
+                userSelect: 'none', WebkitUserSelect: 'none',
               },
               onKeyDown: event => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -589,7 +593,7 @@ window.__ModuleLoader__.load({
         selectedNode ? h('div', {
           role: 'dialog',
           'aria-label': '节点详情',
-          style: { position: 'absolute', top: '10px', right: '10px', width: '280px', maxHeight: 'calc(100% - 20px)', overflow: 'auto', border: C.border, borderRadius: '10px', background: C.layer, padding: '12px', boxShadow: '0 10px 24px rgba(0,0,0,.2)' },
+          style: { position: 'absolute', top: '10px', right: '10px', width: '280px', maxHeight: 'calc(100% - 20px)', overflow: 'auto', border: C.border, borderRadius: '10px', background: C.layer, padding: '12px', boxShadow: '0 10px 24px rgba(0,0,0,.2)', userSelect: 'text', WebkitUserSelect: 'text' },
         },
         h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' } },
           h('span', { style: { fontSize: '10px', color: fillOf(selectedNode), fontWeight: 600 } }, `${KIND_LABEL[selectedNode.kind] || selectedNode.kind} · ${selectedNode.id}`),
@@ -742,9 +746,13 @@ window.__ModuleLoader__.load({
             badge('置信度 ' + flow.confidence, C.muted))))))
     }
 
-    function Report({ data }) {
+    function Report({ data, sessionId }) {
       const [copied, setCopied] = React.useState(false)
-      const markdown = typeof data.report === 'string' ? data.report : ''
+      const projectId = data.engagement && data.engagement.projectId
+      const projectTombstoned = projectId !== undefined && (data.projectTombstones || []).some(item => item.sessionId === sessionId && item.projectId === projectId)
+      const markdown = typeof data.report === 'string' && projectTombstoned
+        ? data.report.replace(/^- 项目：.*\n?/m, '')
+        : (typeof data.report === 'string' ? data.report : '')
       if (markdown === '') {
         return card('报告', h('p', { style: S.faint }, '报告由宿主生成：在会话中调用 ly_report（或 ly_state 刷新）后显示。'))
       }
@@ -833,11 +841,15 @@ window.__ModuleLoader__.load({
           const state = list.projectionsBySession && list.projectionsBySession[id]
           const data = state && state.values && state.values.lingeye
           if (data === undefined || data === null || data.initialized !== true) continue
-          const projectId = (data.engagement && data.engagement.projectId) || id
+          const rawProjectId = data.engagement && data.engagement.projectId
+          const tombstoned = rawProjectId !== undefined && (data.projectTombstones || [])
+            .some(item => item.sessionId === id && item.projectId === rawProjectId)
+          const projectId = rawProjectId && !tombstoned ? rawProjectId : id
           let group = map.get(projectId)
           if (group === undefined) {
             group = {
               id: projectId,
+              standalone: projectId === id,
               target: (data.engagement && data.engagement.target) || projectId,
               objective: (data.engagement && data.engagement.objective) || '',
               sessions: [],
@@ -850,7 +862,7 @@ window.__ModuleLoader__.load({
             map.set(projectId, group)
           }
           const row = list.byId[id]
-          group.sessions.push({ id, title: (row && (row.displayTitle || row.title)) || id })
+          group.sessions.push({ id, title: (row && (row.displayTitle || row.title)) || id, retained: row !== undefined && Object.values(row.retainedBy || {}).some(count => Number(count) > 0) })
           const counts = data.counts || {}
           group.intents += Number(counts.intents) || 0
           group.facts += Number(counts.facts) || 0
@@ -864,6 +876,32 @@ window.__ModuleLoader__.load({
       const open = (sessionId) => {
         const workspace = clientCtx && clientCtx.uiWorkspace
         if (workspace && typeof workspace.openSession === 'function') workspace.openSession(sessionId)
+      }
+      const unlink = async (group) => {
+        const first = group.sessions.find(session => session.retained) || group.sessions[0]
+        const sessions = clientCtx && clientCtx.sessions
+        if (first === undefined || sessions === undefined) return
+        if (!first.retained) {
+          window.alert('这个项目当前没有活跃会话可执行清理。请先打开任一关联会话，再回来解除分组。')
+          return
+        }
+        const confirmed = window.confirm(`解除项目「${group.id}」的分组？\n\n只清除 projectId 关联，保留所有会话、资产、证据与漏洞。\n会在第一个关联会话中发起一轮清理指令，由指挥官执行 ly_project_unlink。`)
+        if (!confirmed) return
+        try {
+          const accepted = await sessions.using(first.id, { source: 'lingeye-projects' }, async reference => {
+            return reference.binding.session.prompt([{
+              type: 'text',
+              text: `请只调用 ly_project_unlink，projectId="${group.id}"，解除该项目的分组，保留全部数据。完成后只回复“已解除分组”。`,
+            }], 'queue')
+          })
+          if (accepted !== undefined && accepted.ok === false) {
+            window.alert(`解除分组未发送：${accepted.error?.message || '会话拒绝了这次指令'}`)
+            return
+          }
+          refresh()
+        } catch (error) {
+          window.alert(`解除分组失败：${error instanceof Error ? error.message : String(error)}`)
+        }
       }
       return h('div', { style: { ...S.root, maxWidth: '1120px', margin: '0 auto' } },
         h('header', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' } },
@@ -891,8 +929,10 @@ window.__ModuleLoader__.load({
                   style: { ...S.button, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
                   onClick: () => open(session.id),
                 }, session.title))),
-              group.latest > 0 ? h('div', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } }, `最近写入：${new Date(group.latest).toLocaleString()}`) : null)))
-      )
+              group.latest > 0 ? h('div', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } }, `最近写入：${new Date(group.latest).toLocaleString()}`) : null,
+              h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '8px' } },
+                group.standalone ? null : h('button', { type: 'button', style: S.button, onClick: () => { void unlink(group) } }, '解除分组'))))
+      ))
     }
 
     function LingeyeView(props) {
@@ -945,7 +985,7 @@ window.__ModuleLoader__.load({
             'aria-pressed': tab === item.id,
             onClick: () => setTab(item.id),
           }, item.label))),
-        h('div', { style: { flex: 1, minHeight: 0 } }, h(active.view, { data })))
+        h('div', { style: { flex: 1, minHeight: 0 } }, h(active.view, { data, sessionId: props.sessionId })))
     }
 
     /** Preset id of the mode; copies keep the `lingeye-` prefix. */

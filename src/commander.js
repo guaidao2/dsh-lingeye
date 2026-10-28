@@ -97,6 +97,17 @@ export function registerCommander(ctx) {
   }))
 
   ctx.tools.register(tool({
+    name: 'ly_project_unlink',
+    description: 'Remove a project grouping from every session that uses it. This only clears projectId; it keeps all session data, evidence and findings. Use ly_project_link with an empty value to unlink only this session.',
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Project grouping key to unlink from every associated session.' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    presentResult: card('灵眼项目解除分组'),
+    execute: async (args, exec) => store.unlinkProject(args.projectId, sessionIdOf(exec)),
+  }))
+
+  ctx.tools.register(tool({
     name: 'ly_state',
     description: 'Read the full engagement state (engagement, goals, intents, facts, findings, assets, evidence, flows, retests, activity) and refresh the Web tab. Call it after subagent submissions or any notable change.',
     parameters: {},

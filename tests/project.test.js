@@ -50,3 +50,18 @@ test('goal acceptance reaches the report and the UI contract', () => {
   assert.match(read('report.js'), /goal\.acceptance/)
   assert.match(read('client.js'), /验收：/)
 })
+
+test('project unlink keeps records and is exposed to the commander', () => {
+  const store = read('store.js')
+  assert.match(store, /async projectSessionIds\(projectId\)/)
+  assert.match(store, /async unlinkProject\(projectId, callerSessionId\)/)
+  assert.match(store, /projectId: ''/)
+  assert.match(store, /project_tombstones/)
+  const commander = read('commander.js')
+  assert.match(commander, /name: 'ly_project_unlink'/)
+  assert.match(commander, /store\.unlinkProject\(args\.projectId, sessionIdOf\(exec\)\)/)
+  const client = read('client.js')
+  assert.match(client, /userSelect: 'none'/)
+  assert.match(client, /解除分组/)
+  assert.match(client, /projectTombstones/)
+})
