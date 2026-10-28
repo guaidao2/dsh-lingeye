@@ -820,8 +820,11 @@ window.__ModuleLoader__.load({
      */
     function ProjectsPanel(props) {
       const list = props.useSessions(state => state)
+      const workspaces = props.useWorkspaces ? props.useWorkspaces(state => state) : undefined
+      const archived = new Set((workspaces && workspaces.archivedSessionIds) || [])
       const refreshed = React.useRef(false)
       const lingeyeIds = (list.ids || []).filter(id => {
+        if (archived.has(id)) return false
         const row = list.byId && list.byId[id]
         return row !== undefined && isLingeyePreset(presetOf(row))
       })
@@ -877,6 +880,19 @@ window.__ModuleLoader__.load({
         const workspace = clientCtx && clientCtx.uiWorkspace
         if (workspace && typeof workspace.openSession === 'function') workspace.openSession(sessionId)
       }
+      const archive = async (group) => {
+        const target = group.sessions[0]
+        const workspace = clientCtx && clientCtx.uiWorkspace
+        if (target === undefined || workspace === undefined || typeof workspace.archiveSession !== 'function') return
+        const confirmed = window.confirm(`归档会话「${target.title}」？\n\n归档后它会从灵眼项目面板和侧栏消失，数据不会删除，可在归档中恢复。`)
+        if (!confirmed) return
+        try {
+          await workspace.archiveSession(target.id)
+          refresh()
+        } catch (error) {
+          window.alert(`归档失败：${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
       const unlink = async (group) => {
         const first = group.sessions.find(session => session.retained) || group.sessions[0]
         const sessions = clientCtx && clientCtx.sessions
@@ -931,7 +947,9 @@ window.__ModuleLoader__.load({
                 }, session.title))),
               group.latest > 0 ? h('div', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } }, `最近写入：${new Date(group.latest).toLocaleString()}`) : null,
               h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '8px' } },
-                group.standalone ? null : h('button', { type: 'button', style: S.button, onClick: () => { void unlink(group) } }, '解除分组'))))
+                group.standalone
+                  ? h('button', { type: 'button', style: S.button, title: '归档会话后从项目面板移除，可在归档中恢复', onClick: () => { void archive(group) } }, '归档会话')
+                  : h('button', { type: 'button', style: S.button, onClick: () => { void unlink(group) } }, '解除分组'))))
       ))
     }
 

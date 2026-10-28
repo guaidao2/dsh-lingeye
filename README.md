@@ -25,7 +25,7 @@
 ## 功能
 
 - 探索链路：目标、意图、事实、漏洞、提示、约束、攻击路径。
-- 项目聚合（可选）：用 `projectId` 把同一项目的多个会话关联起来，侧栏「灵眼项目」只读汇总意图、事实、漏洞、资产与会话入口；数据仍由各会话写入。项目卡上的「解除分组」只清 projectId，不删除会话数据。
+- 项目聚合（可选）：用 `projectId` 把同一项目的多个会话关联起来，侧栏「灵眼项目」只读汇总意图、事实、漏洞、资产与会话入口；数据仍由各会话写入。项目卡上的「解除分组」只清 projectId，不删除会话数据；没有 projectId 的独立会话卡显示「归档会话」，归档后从面板和侧栏消失，可在归档中恢复。
 - 角色化子 agent：执行、复测、情报、枚举、威胁建模五类子 agent 预设，指挥官按需要派发；编排仍由 DSH 提供。
 - 资产图与覆盖率：资产按类型归一化去重；只有 finding 或带证据的事实才算"已测"。
 - 证据：命令 / HTTP / 文本 / 文件，记录观测信道与逐层解释，正文按 sha256 内容寻址。
@@ -51,7 +51,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.3.1.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.3.2.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。

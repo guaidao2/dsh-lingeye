@@ -63,5 +63,7 @@ test('project unlink keeps records and is exposed to the commander', () => {
   const client = read('client.js')
   assert.match(client, /userSelect: 'none'/)
   assert.match(client, /解除分组/)
+  assert.match(client, /归档会话/)
+  assert.match(client, /archiveSession/)
   assert.match(client, /projectTombstones/)
 })
