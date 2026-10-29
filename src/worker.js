@@ -86,7 +86,7 @@ export function registerWorker(ctx) {
 
   ctx.tools.register(tool({
     name: 'ly_submit',
-    description: 'Atomically submit confirmed results into the delegated intent: facts (with basis), new assets, findings (with reproducible steps), evidence (with channel/layers), dataflows and activity notes. Submit incrementally; never resubmit an item.',
+    description: 'Atomically submit confirmed results into the delegated intent: facts (with basis), new assets, findings (with reproducible steps), evidence (with channel/layers), dataflows and activity notes. Submit incrementally; never resubmit an item. The result returns ids for records created in this batch; reuse those ids when a later batch references them.',
     parameters: {
       intentId: { type: 'string', required: true, description: 'The parent intent id supplied in the delegation.' },
       facts: {

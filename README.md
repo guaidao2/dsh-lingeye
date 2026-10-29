@@ -34,9 +34,11 @@
 - 报告与导出：`report.md`、`findings.json`、`assets.json`、`graph.json`、`coverage.json`、逐漏洞 Markdown、证据文件。
 - 可选宿主调度器：侦察/执行子 agent 可由宿主按前沿自动派发。
 - Web 页签：总览、探索（列表/链路图切换）、资产、漏洞、证据、数据流、报告、复测。
+- 灵眼操控中心采用标签页：总览、项目、环境、MCP。
 - 灵眼操控中心：全局只读视图，汇总灵眼会话、项目组、漏洞数、Git Bash 状态与认证 Cookie 健康度。
 - 环境增强：可选 Git Bash，默认关闭；开启后所有会话的 shell 切到 bash 语义，适合渗透工具链。
-- 环境维护：只读检测 `dsh-auth-*` cookie 数量与请求头大小，接近 16KB 时提示；不自动清理。
+- 环境维护：检测 `dsh-auth-*` cookie 数量与请求头大小，接近 16KB 时提示；默认只检测，手动确认后才清理旧 cookie。
+- MCP：表格式配置 stdio / streamable-http 服务器，复用官方 mcp-client；不提供 JSON/YAML 手填，也不与其它 MCP 插件静默抢命名。
 
 ## 环境增强（可选）
 
@@ -45,6 +47,25 @@ Git Bash 默认关闭，需要显式开启。打开「灵眼操控中心」，�
 自动检测顺序是 `GIT_BASH`、常见安装路径、`PATH`（含 `git\cmd\..\bin` 反推）；不读注册表，也不会把 `System32\bash.exe` 当成 Git Bash。开启后模型只看到 `bash`，不再看到 `pwsh`。默认关闭时保持原样。
 
 
+
+## MCP 配置
+
+MCP 标签页只提供表格式配置，不要求用户编辑 JSON 或 YAML：
+
+- `stdio`：填写名称、命令、参数、环境变量、超时；
+- `streamable-http`：填写名称、URL、请求头、超时；
+- 保存后由灵眼加载官方 `@deepseek-ai/dsh-mcp-client`，工具名仍使用官方的 `mcp__<serverName>__<tool>`；
+- 与其他 MCP 插件共用同一命名空间规则，重名会显示连接失败，不会静默覆盖。
+
+MCP 传输只支持 `stdio` 和 `streamable-http`；旧 HTTP+SSE 不在支持范围。
+
+## Cookie 清理
+
+环境维护默认只检测，不自动删除。需要清理时点「清理旧 Cookie」并确认：
+
+- 保留当前 authority 的登录 cookie；
+- 只让旧的 `dsh-auth-*` 过期，不碰其他 cookie；
+- 如果请求头已经超过 Node 的 16KB 上限并返回 431，页面本身打不开，只能手动清浏览器 cookie。
 
 ![复测页签](assets/tab-retest.png)
 
@@ -62,7 +83,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.4.0.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.5.0.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。

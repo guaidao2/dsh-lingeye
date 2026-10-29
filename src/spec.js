@@ -246,6 +246,22 @@ export const environmentSettingsSchema = z.object({
   updatedAt: iso,
 })
 
+/** One user-configured MCP server; transport-specific fields are ignored when unused. */
+export const mcpServerSchema = z.object({
+  id,
+  serverName: z.string().min(1),
+  transport: z.enum(['stdio', 'streamable-http']).default('stdio'),
+  command: z.string().default(''),
+  args: z.array(z.string()).default([]),
+  env: z.array(z.object({ key: z.string(), value: z.string() })).default([]),
+  url: z.string().default(''),
+  headers: z.array(z.object({ key: z.string(), value: z.string() })).default([]),
+  timeoutMs: z.number().default(60000),
+  failOnStartupError: z.boolean().default(true),
+  enabled: z.boolean().default(true),
+  updatedAt: iso,
+})
+
 /** The whole 灵眼 domain. */
 export const lingeyeDomainSpec = defineDomain({
   name: 'lingeye',
@@ -267,5 +283,6 @@ export const lingeyeDomainSpec = defineDomain({
     attack_paths: domainTable(attackPathSchema),
     project_tombstones: domainTable(projectTombstoneSchema),
     environment_settings: domainTable(environmentSettingsSchema),
+    mcp_servers: domainTable(mcpServerSchema),
   },
 })

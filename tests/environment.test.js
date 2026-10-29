@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cookieReport, sameOrigin } from '../src/environment.js'
+import { createHash } from 'node:crypto'
+import { cookieReport, sameOrigin, cleanupCookieHeaders } from '../src/environment.js'
 
 test('cookie diagnostics count only dsh-auth cookies and never expose values', () => {
   const report = cookieReport({ headers: { cookie: 'dsh-auth-one=secret; dsh-auth-two=x; other=value' } })
@@ -22,4 +23,16 @@ test('environment writes accept same-origin requests only', () => {
   assert.equal(sameOrigin({ headers: { origin: 'http://127.0.0.1:3080', host: '127.0.0.1:3080' } }), true)
   assert.equal(sameOrigin({ headers: { origin: 'https://evil.example', host: '127.0.0.1:3080' } }), false)
   assert.equal(sameOrigin({ headers: {} }), true)
+})
+
+test('cookie cleanup keeps the current authority and expires only old auth cookies', () => {
+  const current = `dsh-auth-${createHash('sha256').update('127.0.0.1:3080').digest('base64url')}`
+  const req = { headers: { host: '127.0.0.1:3080', cookie: `dsh-auth-old=x; ${current}=y; other=z` } }
+  const result = cleanupCookieHeaders(req)
+  assert.deepEqual(result.removed, ['dsh-auth-old'])
+  assert.equal(result.kept, current)
+  assert.equal(result.headers.length, 1)
+  assert.match(result.headers[0], /Max-Age=0/)
+  assert.match(result.headers[0], /Path=\//)
+  assert.equal(JSON.stringify(result).includes('=y'), false)
 })

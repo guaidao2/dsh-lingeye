@@ -7,6 +7,7 @@
  * route never reads or returns cookie values.
  */
 
+import { createHash } from 'node:crypto'
 import { explicitGitBashPath } from './gitbash-core.js'
 
 export const name = 'lingeye-environment'
@@ -36,6 +37,33 @@ export function cookieReport(req) {
     estimatedRequestHeaderBytes,
     warning: estimatedRequestHeaderBytes >= HEADER_LIMIT_BYTES * WARN_RATIO,
     cookieTotal: segments.length,
+  }
+}
+
+/** Build the delete headers for every old DSH auth cookie while keeping the current authority. */
+export function cleanupCookieHeaders(req, protocol = 'http:') {
+  const raw = typeof req.headers.cookie === 'string' ? req.headers.cookie : ''
+  const names = []
+  for (const segment of raw.split(';')) {
+    const trimmed = segment.trim()
+    const at = trimmed.indexOf('=')
+    if (at <= 0) continue
+    const name = trimmed.slice(0, at)
+    if (/^dsh-auth-[A-Za-z0-9_-]+$/u.test(name)) names.push(name)
+  }
+  const host = typeof req.headers.host === 'string' ? req.headers.host : ''
+  let current
+  if (host !== '') {
+    const parsed = new URL(`${protocol === 'https:' ? 'https:' : 'http:'}//${host}`)
+    const authority = protocol === 'https:' ? parsed.origin : parsed.host
+    current = `dsh-auth-${createHash('sha256').update(authority).digest('base64url')}`
+  }
+  const secure = protocol === 'https:'
+  const removed = names.filter(name => name !== current)
+  return {
+    removed,
+    kept: names.includes(current) ? current : null,
+    headers: removed.map(name => `${name}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`),
   }
 }
 
@@ -165,6 +193,22 @@ export function apply(ctx, config = {}) {
         const body = await readJsonBody(req)
         if (body === null || typeof body !== 'object' || Array.isArray(body)) {
           throw new Error('request body must be a JSON object')
+        }
+        if (body.action === 'cleanup-cookies') {
+          if (body.confirm !== true) throw new Error('cookie cleanup requires explicit confirmation')
+          const cleanup = cleanupCookieHeaders(req, webServer.protocol)
+          res.writeHead(200, {
+            'cache-control': 'no-store',
+            'content-type': 'application/json; charset=utf-8',
+            ...(cleanup.headers.length === 0 ? {} : { 'set-cookie': cleanup.headers }),
+          })
+          res.end(JSON.stringify({
+            cleaned: cleanup.removed.length,
+            removed: cleanup.removed,
+            kept: cleanup.kept,
+            cookies: cookieReport(req),
+          }))
+          return
         }
         const saved = await save(body)
         writeJson(res, 200, { settings: saved, gitbash: gitbashReport(ctx) })

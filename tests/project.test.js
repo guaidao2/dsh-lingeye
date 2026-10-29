@@ -67,3 +67,12 @@ test('project unlink keeps records and is exposed to the commander', () => {
   assert.match(client, /archiveSession/)
   assert.match(client, /projectTombstones/)
 })
+
+
+test('commander persona does not depend on the resumed-session model variable', () => {
+  assert.doesNotMatch(readPreset(), /\{\{model\}\}/)
+})
+
+test('submit returns ids for records a later submission may reference', () => {
+  assert.match(read('store.js'), /ids: \{[\s\S]*evidence: evidence\.map/)
+})

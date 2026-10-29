@@ -525,6 +525,55 @@ export default class LingeyeStore extends Service {
     return row
   }
 
+  /** All configured MCP servers, ordered by name. */
+  async mcpServers() {
+    const domain = await this.domain()
+    return [...domain.table('mcp_servers').entries()]
+      .map(([, row]) => row)
+      .sort((left, right) => left.serverName.localeCompare(right.serverName))
+  }
+
+  /** Create or replace one MCP server configuration. */
+  async saveMcpServer(input = {}) {
+    const serverName = typeof input.serverName === 'string' ? input.serverName.trim() : ''
+    if (!/^[A-Za-z0-9_-]{1,32}$/u.test(serverName)) {
+      throw new Error('serverName must match [A-Za-z0-9_-]{1,32}')
+    }
+    const transport = input.transport === 'streamable-http' ? 'streamable-http' : 'stdio'
+    if (transport === 'stdio' && (typeof input.command !== 'string' || input.command.trim() === '')) throw new Error('stdio requires command')
+    if (transport === 'streamable-http' && (typeof input.url !== 'string' || input.url.trim() === '')) {
+      throw new Error('streamable-http requires url')
+    }
+    const pairs = value => (Array.isArray(value) ? value : [])
+      .map(item => ({ key: String(item?.key ?? '').trim(), value: String(item?.value ?? '') }))
+      .filter(item => item.key !== '')
+    const row = {
+      id: serverName,
+      serverName,
+      transport,
+      command: transport === 'stdio' ? String(input.command ?? '').trim() : '',
+      args: Array.isArray(input.args) ? input.args.map(String) : [],
+      env: transport === 'stdio' ? pairs(input.env) : [],
+      url: transport === 'streamable-http' ? String(input.url ?? '').trim() : '',
+      headers: transport === 'streamable-http' ? pairs(input.headers) : [],
+      timeoutMs: Number.isFinite(Number(input.timeoutMs)) && Number(input.timeoutMs) > 0 ? Number(input.timeoutMs) : 60000,
+      failOnStartupError: input.failOnStartupError !== false,
+      enabled: input.enabled !== false,
+      updatedAt: now(),
+    }
+    const domain = await this.domain()
+    await domain.table('mcp_servers').put(serverName, row)
+    return row
+  }
+
+  /** Delete one MCP server configuration. */
+  async deleteMcpServer(serverName) {
+    const name = String(serverName ?? '').trim()
+    const domain = await this.domain()
+    await domain.table('mcp_servers').delete(name)
+    return { serverName: name }
+  }
+
   /** Full serializable state of one engagement. */
   async snapshot(sessionId) {
     const engagement = await this.engagement(sessionId)
@@ -1120,6 +1169,15 @@ export default class LingeyeStore extends Service {
           counts: {
             facts: facts.length, assets: assets.length, findings: findings.length,
             evidence: evidence.length, flows: flows.length,
+          },
+          // New ids are returned so a worker can reference them in a later
+          // submission instead of silently losing the relationship.
+          ids: {
+            evidence: evidence.map(item => item.id),
+            assets: assets.map(item => item.id),
+            facts: facts.map(item => item.id),
+            findings: findings.map(item => item.id),
+            flows: flows.map(item => item.id),
           },
         }
       } catch (error) {

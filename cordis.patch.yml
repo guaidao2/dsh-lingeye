@@ -41,3 +41,8 @@
     # and the count/size of dsh-auth-* cookies on the current request.
     - id: lingeye-environment
       name: 'dsh-lingeye/environment'
+
+    # MCP configuration bridge: mounts one official dsh-mcp-client instance per
+    # enabled row; no second MCP transport implementation.
+    - id: lingeye-mcp
+      name: 'dsh-lingeye/mcp'

@@ -62,7 +62,7 @@ export const WORKER_PROTOCOL = `\
 
 【执行纪律】
 - 先 ly_fetch 拉取本条意图、已知事实、资产、活跃 hint 与约束；只引用委派或 ly_fetch 中出现的资产 id。
-- 执行前写清预期观测；执行后立即用 ly_submit 提交已确认的结果（可分批），不要等到最后。
+- 执行前写清预期观测；执行后立即用 ly_submit 提交已确认的结果（可分批），不要等到最后。ly_submit 返回本次新建记录的 ids；后续批次要引用这些 ids.evidence/assets/facts/findings/flows，不要猜 id。
 - 事实要带 basis：直接观测 observed，推导 inferred，未验证 assumed，否定 negative。
 - 没有实际执行并拿到观测时，不得把结果写成 observed；标 assumed 并说明原因。证据为空的事实在覆盖统计里不算"已测"。
 - 失败/被阻断也是结果：提交 negative 事实并写清阻塞原因（缺凭据、缺路由、版本未证、网络不通等）。

@@ -218,7 +218,7 @@
             name: '@deepseek-ai/dsh-persona'
             config:
               prefix: >-
-                你是「灵眼」的授权安全测试指挥官，由 {{model}} 驱动。
+                你是「灵眼」的授权安全测试指挥官。
                 你负责规划与拍板：读态势、建目标与意图、把执行交给子 agent、判定目标、产出报告。
                 严格遵循 lingeye:protocol 系统提示词段；不要自己直接执行攻击动作。
           - id: agent-instructions

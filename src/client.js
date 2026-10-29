@@ -813,6 +813,125 @@ window.__ModuleLoader__.load({
       h('circle', { cx: 12, cy: 12, r: 2.6 }))
     }
 
+    /** Human-readable MCP server form; all write paths go through /lingeye/mcp. */
+    function McpPanel() {
+      const empty = { serverName: '', transport: 'stdio', command: '', args: '', env: '', url: '', headers: '', timeoutMs: '60000', enabled: true }
+      const [data, setData] = React.useState(null)
+      const [error, setError] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [message, setMessage] = React.useState('')
+      const [draft, setDraft] = React.useState(empty)
+      const field = { width: '100%', boxSizing: 'border-box', padding: '5px 7px', borderRadius: '6px', border: C.border, background: C.layer2, color: C.text, fontSize: '11px' }
+      const area = { ...field, minHeight: '52px', resize: 'vertical' }
+      const load = () => {
+        fetch('/lingeye/mcp', { cache: 'no-store', credentials: 'same-origin' })
+          .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+          .then(value => { setData(value); setError('') })
+          .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+      }
+      React.useEffect(load, [])
+      const pairs = text => text.split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+        const at = line.indexOf('=')
+        return at <= 0 ? { key: line, value: '' } : { key: line.slice(0, at).trim(), value: line.slice(at + 1).trim() }
+      })
+      const save = () => {
+        setBusy(true); setMessage('')
+        fetch('/lingeye/mcp', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'save', serverName: draft.serverName, transport: draft.transport, command: draft.command,
+            args: draft.args.split('\n').map(line => line.trim()).filter(Boolean),
+            env: pairs(draft.env), url: draft.url, headers: pairs(draft.headers),
+            timeoutMs: Number(draft.timeoutMs), enabled: draft.enabled,
+          }),
+        })
+          .then(async response => {
+            const value = await response.json()
+            if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`)
+            setData(value); setMessage('已保存，正在连接。')
+          })
+          .catch(reason => setMessage(reason instanceof Error ? reason.message : String(reason)))
+          .finally(() => setBusy(false))
+      }
+      const remove = row => {
+        if (!window.confirm(`删除 MCP 服务器「${row.serverName}」？`)) return
+        setBusy(true)
+        fetch('/lingeye/mcp', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', serverName: row.serverName }),
+        })
+          .then(async response => {
+            const value = await response.json()
+            if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`)
+            setData(value); setMessage('已删除。')
+          })
+          .catch(reason => setMessage(reason instanceof Error ? reason.message : String(reason)))
+          .finally(() => setBusy(false))
+      }
+      const edit = row => setDraft({
+        serverName: row.serverName, transport: row.transport, command: row.command ?? '',
+        args: (row.args ?? []).join('\n'), env: (row.env ?? []).map(item => `${item.key}=${item.value}`).join('\n'),
+        url: row.url ?? '', headers: (row.headers ?? []).map(item => `${item.key}=${item.value}`).join('\n'),
+        timeoutMs: String(row.timeoutMs ?? 60000), enabled: row.enabled !== false,
+      })
+      const statusOf = name => data?.status?.servers?.find(item => item.serverName === name)
+      return h('div', { style: { display: 'grid', gap: '12px' } },
+        h('section', { style: S.card },
+          h('div', { style: S.itemHead },
+            h('span', { style: S.itemTitle }, 'MCP 服务器'),
+            data?.status?.available === false ? badge('官方客户端不可用', C.error) : null,
+            data?.status?.available === true ? badge('官方 mcp-client', C.success) : null),
+          data?.status?.error ? h('p', { style: { ...S.faint, marginTop: '6px' } }, data.status.error) : null,
+          error ? h('p', { style: { ...S.faint, marginTop: '6px' } }, error) : null,
+          h('div', { style: { display: 'grid', gap: '6px', marginTop: '8px' } },
+            (data?.servers ?? []).length === 0 ? h('p', { style: S.faint }, '还没有 MCP 服务器。') : (data?.servers ?? []).map(row => {
+              const status = statusOf(row.serverName)
+              return h('div', { key: row.serverName, style: { border: C.border, borderRadius: '8px', padding: '8px 10px' } },
+                h('div', { style: S.itemHead },
+                  h('span', { style: S.itemTitle }, row.serverName),
+                  badge(row.transport, C.muted),
+                  badge(row.enabled === false ? '停用' : status?.ok === true ? '已连接' : status?.error ? '连接失败' : '配置中',
+                    status?.ok === true ? C.success : status?.error ? C.error : C.muted)),
+                h('div', { style: S.faint }, row.transport === 'stdio' ? `${row.command} ${(row.args ?? []).join(' ')}` : row.url),
+                status?.error ? h('div', { style: { ...S.faint, marginTop: '4px' } }, status.error) : null,
+                h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px' } },
+                  h('button', { type: 'button', style: S.button, onClick: () => edit(row) }, '编辑'),
+                  h('button', { type: 'button', style: S.button, disabled: busy, onClick: () => remove(row) }, '删除')))
+            })),
+          h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' } },
+            h('button', { type: 'button', style: S.button, onClick: () => { setDraft(empty); setMessage('') } }, '新建'),
+            h('button', { type: 'button', style: S.button, onClick: load }, '刷新状态'))),
+        h('section', { style: S.card },
+          h('h3', { style: { margin: '0 0 8px', fontSize: '14px' } }, draft.serverName === '' ? '新建 MCP 服务器' : `编辑 ${draft.serverName}`),
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' } },
+            h('label', { style: { fontSize: '11px' } }, '名称（serverName，唯一）',
+              h('input', { style: field, value: draft.serverName, onChange: e => setDraft({ ...draft, serverName: e.target.value }), placeholder: 'github' })),
+            h('label', { style: { fontSize: '11px' } }, '传输',
+              h('select', { style: field, value: draft.transport, onChange: e => setDraft({ ...draft, transport: e.target.value }) },
+                h('option', { value: 'stdio' }, 'stdio（本地进程）'),
+                h('option', { value: 'streamable-http' }, 'streamable-http（HTTP 流式）'))),
+            h('label', { style: { fontSize: '11px' } }, '超时（毫秒）',
+              h('input', { style: field, value: draft.timeoutMs, onChange: e => setDraft({ ...draft, timeoutMs: e.target.value }) }))),
+          draft.transport === 'stdio'
+            ? h('div', { style: { display: 'grid', gap: '8px', marginTop: '8px' } },
+              h('label', { style: { fontSize: '11px' } }, '命令',
+                h('input', { style: field, value: draft.command, onChange: e => setDraft({ ...draft, command: e.target.value }), placeholder: 'npx' })),
+              h('label', { style: { fontSize: '11px' } }, '参数（每行一个）',
+                h('textarea', { style: area, value: draft.args, onChange: e => setDraft({ ...draft, args: e.target.value }), placeholder: '-y\n@modelcontextprotocol/server-github' })),
+              h('label', { style: { fontSize: '11px' } }, '环境变量（每行 KEY=VALUE）',
+                h('textarea', { style: area, value: draft.env, onChange: e => setDraft({ ...draft, env: e.target.value }) })))
+            : h('div', { style: { display: 'grid', gap: '8px', marginTop: '8px' } },
+              h('label', { style: { fontSize: '11px' } }, 'URL',
+                h('input', { style: field, value: draft.url, onChange: e => setDraft({ ...draft, url: e.target.value }), placeholder: 'http://127.0.0.1:3000/mcp' })),
+              h('label', { style: { fontSize: '11px' } }, '请求头（每行 KEY=VALUE）',
+                h('textarea', { style: area, value: draft.headers, onChange: e => setDraft({ ...draft, headers: e.target.value }) }))),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '11px' } },
+            h('input', { type: 'checkbox', checked: draft.enabled, onChange: e => setDraft({ ...draft, enabled: e.target.checked }) }), '启用'),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' } },
+            h('button', { type: 'button', style: S.button, disabled: busy, onClick: save }, busy ? '保存中…' : '保存并连接'),
+            message ? h('span', { style: { ...S.faint, fontSize: '11px' } }, message) : null)))
+    }
+
     /**
      * Read-only project view: group the Lingeye projections already held by
      * the session list by `engagement.projectId`. Writes still belong to each
@@ -823,12 +942,15 @@ window.__ModuleLoader__.load({
       const workspaces = props.useWorkspaces ? props.useWorkspaces(state => state) : undefined
       const archived = new Set((workspaces && workspaces.archivedSessionIds) || [])
       const refreshed = React.useRef(false)
+      const [tab, setTab] = React.useState('overview')
       const [environment, setEnvironment] = React.useState(null)
       const [environmentError, setEnvironmentError] = React.useState('')
       const [gitbashEnabled, setGitbashEnabled] = React.useState(false)
       const [gitbashPath, setGitbashPath] = React.useState('')
       const [savingEnvironment, setSavingEnvironment] = React.useState(false)
       const [environmentSaveError, setEnvironmentSaveError] = React.useState('')
+      const [cleaningCookies, setCleaningCookies] = React.useState(false)
+      const [cleanupMessage, setCleanupMessage] = React.useState('')
       const loadEnvironment = () => {
         fetch('/lingeye/environment', { cache: 'no-store', credentials: 'same-origin' })
           .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
@@ -858,6 +980,24 @@ window.__ModuleLoader__.load({
           })
           .catch(error => { setEnvironmentSaveError(error instanceof Error ? error.message : String(error)) })
           .finally(() => setSavingEnvironment(false))
+      }
+      const cleanupCookies = () => {
+        const count = environment?.cookies?.authCount ?? 0
+        if (!window.confirm(`清理旧的认证 Cookie？\n\n会保留当前端口的登录，只删除其他 ${Math.max(0, count - 1)} 条 dsh-auth-*；不会碰其他 cookie。`)) return
+        setCleaningCookies(true)
+        setCleanupMessage('')
+        fetch('/lingeye/environment', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'cleanup-cookies', confirm: true }),
+        })
+          .then(async response => {
+            const value = await response.json()
+            if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`)
+            setCleanupMessage(`已清理 ${value.cleaned} 条旧 Cookie。`)
+            window.setTimeout(loadEnvironment, 300)
+          })
+          .catch(error => { setCleanupMessage(error instanceof Error ? error.message : String(error)) })
+          .finally(() => setCleaningCookies(false))
       }
       const lingeyeIds = (list.ids || []).filter(id => {
         if (archived.has(id)) return false
@@ -967,7 +1107,14 @@ window.__ModuleLoader__.load({
           badge(`${lingeyeIds.length} 灵眼会话`, C.muted),
           badge(`${groups.filter(group => group.standalone !== true).length} 项目组`, C.muted),
           badge(`${groups.reduce((sum, group) => sum + group.findings, 0)} 漏洞`, C.muted)),
-        h('section', { style: { ...S.card, marginBottom: '12px' } },
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '12px', borderBottom: C.border, paddingBottom: '6px' } },
+          [['overview', '总览'], ['projects', '项目'], ['environment', '环境'], ['mcp', 'MCP']].map(([id, label]) =>
+            h('button', {
+              key: id, type: 'button', onClick: () => setTab(id),
+              style: { ...S.tab, flex: '0 0 auto', ...(tab === id ? S.tabActive : {}) },
+            }, label))),
+        tab === 'mcp' ? h(McpPanel) : null,
+        h('section', { style: { display: tab === 'overview' || tab === 'environment' ? 'block' : 'none', ...S.card, marginBottom: '12px' } },
           h('div', { style: S.itemHead },
             h('span', { style: S.itemTitle }, '环境增强 / 维护'),
             environmentError ? badge('检测不可用', C.error) : null),
@@ -1005,13 +1152,16 @@ window.__ModuleLoader__.load({
                   ? '正在检测…'
                   : `${environment.cookies.authCount} 条 dsh-auth-* · 请求头约 ${(environment.cookies.estimatedRequestHeaderBytes / 1024).toFixed(1)} KB / ${(environment.cookies.headerLimitBytes / 1024).toFixed(0)} KB`),
               environment?.cookies?.warning
-                ? h('div', { style: { ...S.faint, marginTop: '4px' } }, '接近 Node 的请求头上限；继续累积会出现 431。默认只检测，不自动清理。')
-                : null)),
+                ? h('div', { style: { ...S.faint, marginTop: '4px' } }, '接近 Node 的请求头上限；继续累积会出现 431。默认只检测，手动确认后才清理。')
+                : null,
+              h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' } },
+                h('button', { type: 'button', style: S.button, disabled: cleaningCookies, onClick: cleanupCookies }, cleaningCookies ? '清理中…' : '清理旧 Cookie'),
+                cleanupMessage ? h('span', { style: { ...S.faint, fontSize: '11px' } }, cleanupMessage) : null))),
           h('p', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } },
-            '环境增强默认关闭；Cookie 检测只读，不自动删除任何 cookie。')),
+            '环境增强默认关闭；Cookie 默认只检测，清理必须手动确认。')),
         groups.length === 0
-          ? h('div', { style: S.card }, h('p', { style: S.faint }, '还没有可聚合的灵眼项目。先在灵眼会话里调用 ly_start，并用 projectId 把同一项目的多个会话关联起来。'))
-          : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' } },
+          ? h('div', { style: { display: tab === 'overview' || tab === 'projects' ? 'block' : 'none', ...S.card } }, h('p', { style: S.faint }, '还没有可聚合的灵眼项目。先在灵眼会话里调用 ly_start，并用 projectId 把同一项目的多个会话关联起来。'))
+          : h('div', { style: { display: tab === 'overview' || tab === 'projects' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' } },
             groups.map(group => h('section', { key: group.id, style: S.card },
               h('div', { style: S.itemHead },
                 h('span', { style: S.itemTitle }, group.target),
