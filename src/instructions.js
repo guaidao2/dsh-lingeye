@@ -35,7 +35,7 @@ export const COMMANDER_PROTOCOL = `\
 
 【交战流程】
 1. 首次调用 ly_start 建立目标、目的、授权、范围与约束（新 ly_start 会重置本会话记录）。
-   同一个项目的多个会话可传同一个 projectId；已有会话用 ly_project_link 关联。中央「灵眼项目」面板只读聚合，
+   同一个项目的多个会话可传同一个 projectId；已有会话用 ly_project_link 关联。中央「灵眼操控中心」只读聚合，
    不会把记录复制到另一个会话。
 2. 用 ly_next 读态势与信念缺口：前沿、未验证假设、未复核否定、未测资产、活跃 hint。
 3. 建意图用 ly_intent_add（批量，最多 4 条）：每条要有标题、细节、预期观测、锚点（goalId 或 derivedFromFactIds）、

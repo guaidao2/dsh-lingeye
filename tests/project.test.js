@@ -36,10 +36,10 @@ test('client registers the global project page and the readable graph', () => {
 
 test('role presets are declared, allowed, and inserted before the commander', () => {
   const presets = readPreset()
-  const commanderAt = presets.indexOf('- id: preset-lingeye\n')
+  const commanderAt = presets.search(/- id: preset-lingeye\r?\n/)
   assert.ok(commanderAt > 0)
   for (const id of ['lingeye-intel', 'lingeye-enumerator', 'lingeye-threat-modeler']) {
-    const at = presets.indexOf(`- id: preset-${id}\n`)
+    const at = presets.search(new RegExp(`- id: preset-${id}\\r?\\n`))
     assert.ok(at >= 0, `missing preset ${id}`)
     assert.ok(at < commanderAt, `${id} must precede the commander preset`)
     assert.match(presets, new RegExp(`- ${id}`))

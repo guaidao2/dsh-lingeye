@@ -23,3 +23,21 @@
     # profile's default storage backend; only this plugin's records live there.
     - id: lingeye-store
       name: 'dsh-lingeye/store'
+
+    # Optional Git Bash environment enhancement. Disabled by default; the
+    # control-center switch registers a host-global `bash` tool and hides the
+    # native pwsh tool while it is active.
+    - id: lingeye-gitbash
+      name: 'dsh-lingeye/gitbash'
+      disabled: !!js process.platform !== 'win32'
+      config:
+        timeoutMs: 120000
+        maxTimeoutMs: 600000
+        maxOutputBytes: 64000
+        maxSpillBytes: 67108864
+        graceMs: 3000
+
+    # Read-only environment diagnostics for the 灵眼操控中心: Git Bash status
+    # and the count/size of dsh-auth-* cookies on the current request.
+    - id: lingeye-environment
+      name: 'dsh-lingeye/environment'

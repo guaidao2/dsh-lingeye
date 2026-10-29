@@ -25,7 +25,7 @@
 ## 功能
 
 - 探索链路：目标、意图、事实、漏洞、提示、约束、攻击路径。
-- 项目聚合（可选）：用 `projectId` 把同一项目的多个会话关联起来，侧栏「灵眼项目」只读汇总意图、事实、漏洞、资产与会话入口；数据仍由各会话写入。项目卡上的「解除分组」只清 projectId，不删除会话数据；没有 projectId 的独立会话卡显示「归档会话」，归档后从面板和侧栏消失，可在归档中恢复。
+- 项目聚合（可选）：用 `projectId` 把同一项目的多个会话关联起来，侧栏「灵眼操控中心」只读汇总意图、事实、漏洞、资产与会话入口；数据仍由各会话写入。项目卡上的「解除分组」只清 projectId，不删除会话数据；没有 projectId 的独立会话卡显示「归档会话」，归档后从面板和侧栏消失，可在归档中恢复。
 - 角色化子 agent：执行、复测、情报、枚举、威胁建模五类子 agent 预设，指挥官按需要派发；编排仍由 DSH 提供。
 - 资产图与覆盖率：资产按类型归一化去重；只有 finding 或带证据的事实才算"已测"。
 - 证据：命令 / HTTP / 文本 / 文件，记录观测信道与逐层解释，正文按 sha256 内容寻址。
@@ -34,6 +34,17 @@
 - 报告与导出：`report.md`、`findings.json`、`assets.json`、`graph.json`、`coverage.json`、逐漏洞 Markdown、证据文件。
 - 可选宿主调度器：侦察/执行子 agent 可由宿主按前沿自动派发。
 - Web 页签：总览、探索（列表/链路图切换）、资产、漏洞、证据、数据流、报告、复测。
+- 灵眼操控中心：全局只读视图，汇总灵眼会话、项目组、漏洞数、Git Bash 状态与认证 Cookie 健康度。
+- 环境增强：可选 Git Bash，默认关闭；开启后所有会话的 shell 切到 bash 语义，适合渗透工具链。
+- 环境维护：只读检测 `dsh-auth-*` cookie 数量与请求头大小，接近 16KB 时提示；不自动清理。
+
+## 环境增强（可选）
+
+Git Bash 默认关闭，需要显式开启。打开「灵眼操控中心」，在「环境增强 / 维护」里勾选启用，并填写 `bash.exe` 路径；留空会自动检测。保存后立即生效。
+
+自动检测顺序是 `GIT_BASH`、常见安装路径、`PATH`（含 `git\cmd\..\bin` 反推）；不读注册表，也不会把 `System32\bash.exe` 当成 Git Bash。开启后模型只看到 `bash`，不再看到 `pwsh`。默认关闭时保持原样。
+
+
 
 ![复测页签](assets/tab-retest.png)
 
@@ -51,7 +62,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.3.2.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.4.0.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。
@@ -159,7 +170,7 @@ dsh --profile <dev-profile> --no-open --port 0
 
 ## 许可
 
-MIT。Copyright (c) 2026 guaidao2 & coolmoon。内置的 Windows ACL 修复来自 dsh-acl-sandbox-patch（MIT），署名与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+MIT。Copyright (c) 2026 guaidao2 & coolmoon。内置的 Windows ACL 修复来自 dsh-acl-sandbox-patch（MIT），Git Bash 环境增强改编自 dsh-gitbash（MIT），署名与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 参考
 
@@ -168,4 +179,4 @@ MIT。Copyright (c) 2026 guaidao2 & coolmoon。内置的 Windows ACL 修复来�
 - [Cairn](https://github.com/oritera/Cairn)（AGPL-3.0）：Fact / Intent / Hint 黑板、三种任务型与调度。
 - [XuanMu-RedTeam-Agent](https://github.com/guaidao2/XuanMu-RedTeam-Agent)（MIT）：多角色协作、推理黑板、证据平面与攻击路径。
 
-参考项目只借鉴设计与数据模型，运行时代码为本项目独立实现；内置 Windows ACL 修复是唯一随包分发的第三方代码，署名见第三方声明。
+参考项目只借鉴设计与数据模型，运行时代码为本项目独立实现；随包分发的第三方代码包括 Windows ACL 修复和改编自 dsh-gitbash 的 Git Bash 环境增强，署名见第三方声明。

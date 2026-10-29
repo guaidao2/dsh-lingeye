@@ -238,6 +238,14 @@ export const projectTombstoneSchema = z.object({
   createdAt: iso,
 })
 
+/** Global environment settings for the 灵眼操控中心. */
+export const environmentSettingsSchema = z.object({
+  id,
+  gitbashEnabled: z.boolean().default(false),
+  gitbashShellPath: z.string().default(''),
+  updatedAt: iso,
+})
+
 /** The whole 灵眼 domain. */
 export const lingeyeDomainSpec = defineDomain({
   name: 'lingeye',
@@ -258,5 +266,6 @@ export const lingeyeDomainSpec = defineDomain({
     constraints: domainTable(constraintSchema),
     attack_paths: domainTable(attackPathSchema),
     project_tombstones: domainTable(projectTombstoneSchema),
+    environment_settings: domainTable(environmentSettingsSchema),
   },
 })

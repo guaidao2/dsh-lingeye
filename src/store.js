@@ -505,6 +505,26 @@ export default class LingeyeStore extends Service {
     return domain.table('engagements').get(sessionId)
   }
 
+  /** Global environment settings, with safe defaults for a fresh install. */
+  async environmentSettings() {
+    const domain = await this.domain()
+    const row = domain.table('environment_settings').get('global')
+    return row ?? { id: 'global', gitbashEnabled: false, gitbashShellPath: '', updatedAt: now() }
+  }
+
+  /** Persist the environment settings owned by the control-center form. */
+  async saveEnvironmentSettings(input = {}) {
+    const domain = await this.domain()
+    const row = {
+      id: 'global',
+      gitbashEnabled: input.gitbashEnabled === true,
+      gitbashShellPath: typeof input.gitbashShellPath === 'string' ? input.gitbashShellPath.trim() : '',
+      updatedAt: now(),
+    }
+    await domain.table('environment_settings').put('global', row)
+    return row
+  }
+
   /** Full serializable state of one engagement. */
   async snapshot(sessionId) {
     const engagement = await this.engagement(sessionId)

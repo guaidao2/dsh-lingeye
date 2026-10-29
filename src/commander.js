@@ -92,7 +92,7 @@ export function registerCommander(ctx) {
       projectId: { type: 'string', required: true, description: 'Project grouping key, or an empty string to unlink.' },
     },
     output: { schema: objectOutput, render: jsonRender },
-    presentResult: card('灵眼项目关联'),
+    presentResult: card('灵眼操控中心关联'),
     execute: async (args, exec) => store.linkProject(sessionIdOf(exec), args.projectId),
   }))
 
@@ -103,7 +103,7 @@ export function registerCommander(ctx) {
       projectId: { type: 'string', required: true, description: 'Project grouping key to unlink from every associated session.' },
     },
     output: { schema: objectOutput, render: jsonRender },
-    presentResult: card('灵眼项目解除分组'),
+    presentResult: card('灵眼操控中心解除分组'),
     execute: async (args, exec) => store.unlinkProject(args.projectId, sessionIdOf(exec)),
   }))
 

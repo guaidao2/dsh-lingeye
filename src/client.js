@@ -22,13 +22,13 @@ window.__ModuleLoader__.load({
       tab: '灵眼',
       empty: '灵眼渗透测试模式尚未开始：在会话里调用 ly_start 建立本次测试。',
       loading: '正在加载灵眼记录…',
-      projects: '灵眼项目',
+      projects: '灵眼操控中心',
     }
     const en = {
       tab: 'Lingeye',
       empty: 'The Lingeye pentest mode has not started: call ly_start in this session.',
       loading: 'Loading Lingeye records…',
-      projects: 'Lingeye projects',
+      projects: 'Lingeye control center',
     }
 
     /* ---------------------------------------------------------------- colors */
@@ -823,17 +823,55 @@ window.__ModuleLoader__.load({
       const workspaces = props.useWorkspaces ? props.useWorkspaces(state => state) : undefined
       const archived = new Set((workspaces && workspaces.archivedSessionIds) || [])
       const refreshed = React.useRef(false)
+      const [environment, setEnvironment] = React.useState(null)
+      const [environmentError, setEnvironmentError] = React.useState('')
+      const [gitbashEnabled, setGitbashEnabled] = React.useState(false)
+      const [gitbashPath, setGitbashPath] = React.useState('')
+      const [savingEnvironment, setSavingEnvironment] = React.useState(false)
+      const [environmentSaveError, setEnvironmentSaveError] = React.useState('')
+      const loadEnvironment = () => {
+        fetch('/lingeye/environment', { cache: 'no-store', credentials: 'same-origin' })
+          .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+          .then(value => {
+            setEnvironment(value)
+            setEnvironmentError('')
+            if (value.settings !== undefined) {
+              setGitbashEnabled(value.settings.gitbashEnabled === true)
+              setGitbashPath(value.settings.gitbashShellPath ?? '')
+            }
+          })
+          .catch(error => { setEnvironmentError(error instanceof Error ? error.message : String(error)) })
+      }
+      const saveEnvironment = () => {
+        setSavingEnvironment(true)
+        setEnvironmentSaveError('')
+        fetch('/lingeye/environment', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ gitbashEnabled, gitbashShellPath: gitbashPath }),
+        })
+          .then(async response => {
+            const value = await response.json()
+            if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`)
+            setEnvironment(previous => ({ ...previous, gitbash: value.gitbash, settings: value.settings }))
+          })
+          .catch(error => { setEnvironmentSaveError(error instanceof Error ? error.message : String(error)) })
+          .finally(() => setSavingEnvironment(false))
+      }
       const lingeyeIds = (list.ids || []).filter(id => {
         if (archived.has(id)) return false
         const row = list.byId && list.byId[id]
         return row !== undefined && isLingeyePreset(presetOf(row))
       })
       const refresh = () => {
+        loadEnvironment()
         const sessions = clientCtx && clientCtx.sessions
         if (lingeyeIds.length === 0 || sessions === undefined) return
         Promise.allSettled(lingeyeIds.map(id => Promise.resolve(sessions.refreshProjections(id))))
       }
       React.useEffect(() => {
+        loadEnvironment()
         if (refreshed.current || lingeyeIds.length === 0) return
         refreshed.current = true
         refresh()
@@ -884,7 +922,7 @@ window.__ModuleLoader__.load({
         const target = group.sessions[0]
         const workspace = clientCtx && clientCtx.uiWorkspace
         if (target === undefined || workspace === undefined || typeof workspace.archiveSession !== 'function') return
-        const confirmed = window.confirm(`归档会话「${target.title}」？\n\n归档后它会从灵眼项目面板和侧栏消失，数据不会删除，可在归档中恢复。`)
+        const confirmed = window.confirm(`归档会话「${target.title}」？\n\n归档后它会从灵眼操控中心和侧栏消失，数据不会删除，可在归档中恢复。`)
         if (!confirmed) return
         try {
           await workspace.archiveSession(target.id)
@@ -922,9 +960,55 @@ window.__ModuleLoader__.load({
       return h('div', { style: { ...S.root, maxWidth: '1120px', margin: '0 auto' } },
         h('header', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' } },
           h('div', null,
-            h('h1', { style: { margin: 0, fontSize: '20px' } }, props.t ? props.t('projects') : '灵眼项目'),
-            h('p', { style: { margin: '4px 0 0', color: C.muted, fontSize: '12px' } }, `按 projectId 聚合的只读视图；仅读取 ${lingeyeIds.length} 个灵眼会话，数据仍由各会话的指挥官写入。`)),
+            h('h1', { style: { margin: 0, fontSize: '20px' } }, props.t ? props.t('projects') : '灵眼操控中心'),
+            h('p', { style: { margin: '4px 0 0', color: C.muted, fontSize: '12px' } }, `全局只读视图；仅读取 ${lingeyeIds.length} 个灵眼会话，数据仍由各会话的指挥官写入。`)),
           h('button', { type: 'button', style: S.button, onClick: refresh }, '刷新')),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' } },
+          badge(`${lingeyeIds.length} 灵眼会话`, C.muted),
+          badge(`${groups.filter(group => group.standalone !== true).length} 项目组`, C.muted),
+          badge(`${groups.reduce((sum, group) => sum + group.findings, 0)} 漏洞`, C.muted)),
+        h('section', { style: { ...S.card, marginBottom: '12px' } },
+          h('div', { style: S.itemHead },
+            h('span', { style: S.itemTitle }, '环境增强 / 维护'),
+            environmentError ? badge('检测不可用', C.error) : null),
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px', marginTop: '8px' } },
+            h('div', { style: { padding: '8px 10px', border: C.border, borderRadius: '8px' } },
+              h('div', { style: S.kvLabel }, 'Git Bash'),
+              h('div', { style: { fontSize: '12px', marginTop: '4px' } },
+                environment?.gitbash === undefined
+                  ? '正在检测…'
+                  : environment.gitbash.supported === false
+                    ? '仅 Windows 支持；当前平台不适用。'
+                    : environment.gitbash.missing === true
+                      ? '已开启，但未找到 Git Bash；请填写路径。'
+                      : environment.gitbash.enabled !== true
+                        ? '未启用（默认关闭）。'
+                        : `已启用 · ${environment.gitbash.shellPath}`),
+              environment?.gitbash?.supported === false ? null : h('div', { style: { display: 'grid', gap: '6px', marginTop: '8px' } },
+                h('label', { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' } },
+                  h('input', { type: 'checkbox', checked: gitbashEnabled, onChange: event => setGitbashEnabled(event.target.checked) }),
+                  '启用 Git Bash（显式切换）'),
+                h('input', {
+                  type: 'text',
+                  value: gitbashPath,
+                  placeholder: '留空自动检测；或填 ...\\Git\\bin\\bash.exe',
+                  onChange: event => setGitbashPath(event.target.value),
+                  style: { width: '100%', boxSizing: 'border-box', padding: '5px 7px', borderRadius: '6px', border: C.border, background: C.layer2, color: C.text, fontSize: '11px' },
+                }),
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+                  h('button', { type: 'button', style: S.button, disabled: savingEnvironment, onClick: saveEnvironment }, savingEnvironment ? '保存中…' : '保存'),
+                  environmentSaveError ? h('span', { style: { ...S.faint, fontSize: '11px' } }, environmentSaveError) : null))),
+            h('div', { style: { padding: '8px 10px', border: C.border, borderRadius: '8px' } },
+              h('div', { style: S.kvLabel }, '认证 Cookie'),
+              h('div', { style: { fontSize: '12px', marginTop: '4px' } },
+                environment?.cookies === undefined
+                  ? '正在检测…'
+                  : `${environment.cookies.authCount} 条 dsh-auth-* · 请求头约 ${(environment.cookies.estimatedRequestHeaderBytes / 1024).toFixed(1)} KB / ${(environment.cookies.headerLimitBytes / 1024).toFixed(0)} KB`),
+              environment?.cookies?.warning
+                ? h('div', { style: { ...S.faint, marginTop: '4px' } }, '接近 Node 的请求头上限；继续累积会出现 431。默认只检测，不自动清理。')
+                : null)),
+          h('p', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } },
+            '环境增强默认关闭；Cookie 检测只读，不自动删除任何 cookie。')),
         groups.length === 0
           ? h('div', { style: S.card }, h('p', { style: S.faint }, '还没有可聚合的灵眼项目。先在灵眼会话里调用 ly_start，并用 projectId 把同一项目的多个会话关联起来。'))
           : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' } },
