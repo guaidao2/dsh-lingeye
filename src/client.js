@@ -566,7 +566,9 @@ window.__ModuleLoader__.load({
                 justifyContent: 'center', gap: '3px', padding: '8px 12px 8px 16px', cursor: 'pointer',
                 borderRadius: '10px', border: `1px solid ${isSelected ? color : C.border}`,
                 borderLeft: `4px solid ${color}`, background: C.layer,
-                boxShadow: isSelected ? `0 0 0 2px ${color}33` : 'none',
+                boxShadow: isSelected
+                  ? `0 0 0 2px color-mix(in srgb, ${color} 20%, transparent), -10px 0 18px -8px color-mix(in srgb, ${color} 40%, transparent)`
+                  : `-10px 0 18px -8px color-mix(in srgb, ${color} 40%, transparent)`,
                 userSelect: 'none', WebkitUserSelect: 'none',
               },
               onKeyDown: event => {
@@ -813,6 +815,73 @@ window.__ModuleLoader__.load({
       h('circle', { cx: 12, cy: 12, r: 2.6 }))
     }
 
+    /** In-app confirmation used instead of the native browser dialog. */
+    function useConfirm() {
+      const [request, setRequest] = React.useState(null)
+      const resolver = React.useRef(null)
+      const previousFocus = React.useRef(null)
+      const dialogRef = React.useRef(null)
+      const ask = options => new Promise(resolve => {
+        previousFocus.current = document.activeElement
+        resolver.current = resolve
+        setRequest(options)
+      })
+      const settle = value => {
+        const resolve = resolver.current
+        resolver.current = null
+        setRequest(null)
+        if (resolve !== null) resolve(value)
+        window.requestAnimationFrame(() => {
+          if (previousFocus.current !== null && typeof previousFocus.current.focus === 'function') previousFocus.current.focus()
+        })
+      }
+      React.useEffect(() => {
+        if (request === null) return undefined
+        const dialog = dialogRef.current
+        const focusables = dialog === null ? [] : [...dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+          .filter(element => !element.disabled && element.getAttribute('aria-hidden') !== 'true')
+        if (focusables.length > 0) focusables[0].focus()
+        const onKey = event => {
+          if (event.key === 'Escape') {
+            settle(false)
+            return
+          }
+          if (event.key !== 'Tab' || focusables.length === 0) return
+          const first = focusables[0]
+          const last = focusables[focusables.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first.focus()
+          }
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [request])
+      const dialog = request === null ? null : h('div', {
+        role: 'presentation',
+        style: { position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' },
+        onMouseDown: event => { if (event.target === event.currentTarget) settle(false) },
+      },
+        h('div', {
+          ref: dialogRef,
+          role: 'dialog', 'aria-modal': 'true', 'aria-label': request.title,
+          style: { width: 'min(420px, 100%)', border: C.border, borderRadius: '12px', background: C.layer, padding: '16px', boxShadow: '0 18px 48px rgba(0,0,0,.35)' },
+        },
+          h('div', { style: { fontSize: '14px', fontWeight: 600, color: C.text } }, request.title),
+          request.body ? h('p', { style: { ...S.detail, margin: '8px 0 0' } }, request.body) : null,
+          h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' } },
+            request.cancelLabel === null ? null : h('button', { type: 'button', style: S.button, onClick: () => settle(false) }, request.cancelLabel || '取消'),
+            h('button', {
+              type: 'button', autoFocus: true,
+              style: { ...S.button, color: request.danger ? C.error : C.text, borderColor: request.danger ? C.error : C.border },
+              onClick: () => settle(true),
+            }, request.confirmLabel || '确认'))))
+      return { ask, dialog }
+    }
+
     /** Human-readable MCP server form; all write paths go through /lingeye/mcp. */
     function McpPanel() {
       const empty = { serverName: '', transport: 'stdio', command: '', args: '', env: '', url: '', headers: '', timeoutMs: '60000', enabled: true }
@@ -821,6 +890,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [message, setMessage] = React.useState('')
       const [draft, setDraft] = React.useState(empty)
+      const confirm = useConfirm()
       const field = { width: '100%', boxSizing: 'border-box', padding: '5px 7px', borderRadius: '6px', border: C.border, background: C.layer2, color: C.text, fontSize: '11px' }
       const area = { ...field, minHeight: '52px', resize: 'vertical' }
       const load = () => {
@@ -853,8 +923,8 @@ window.__ModuleLoader__.load({
           .catch(reason => setMessage(reason instanceof Error ? reason.message : String(reason)))
           .finally(() => setBusy(false))
       }
-      const remove = row => {
-        if (!window.confirm(`删除 MCP 服务器「${row.serverName}」？`)) return
+      const remove = async row => {
+        if (!(await confirm.ask({ title: `删除 MCP 服务器「${row.serverName}」？`, body: '删除后该服务器会断开并移除，不影响其他会话。', confirmLabel: '删除', danger: true }))) return
         setBusy(true)
         fetch('/lingeye/mcp', {
           method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
@@ -929,7 +999,7 @@ window.__ModuleLoader__.load({
             h('input', { type: 'checkbox', checked: draft.enabled, onChange: e => setDraft({ ...draft, enabled: e.target.checked }) }), '启用'),
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' } },
             h('button', { type: 'button', style: S.button, disabled: busy, onClick: save }, busy ? '保存中…' : '保存并连接'),
-            message ? h('span', { style: { ...S.faint, fontSize: '11px' } }, message) : null)))
+            message ? h('span', { style: { ...S.faint, fontSize: '11px' } }, message) : null)), confirm.dialog)
     }
 
     /**
@@ -939,6 +1009,7 @@ window.__ModuleLoader__.load({
      */
     function ProjectsPanel(props) {
       const list = props.useSessions(state => state)
+      const confirm = useConfirm()
       const workspaces = props.useWorkspaces ? props.useWorkspaces(state => state) : undefined
       const archived = new Set((workspaces && workspaces.archivedSessionIds) || [])
       const refreshed = React.useRef(false)
@@ -981,9 +1052,10 @@ window.__ModuleLoader__.load({
           .catch(error => { setEnvironmentSaveError(error instanceof Error ? error.message : String(error)) })
           .finally(() => setSavingEnvironment(false))
       }
-      const cleanupCookies = () => {
+      const cleanupCookies = async () => {
         const count = environment?.cookies?.authCount ?? 0
-        if (!window.confirm(`清理旧的认证 Cookie？\n\n会保留当前端口的登录，只删除其他 ${Math.max(0, count - 1)} 条 dsh-auth-*；不会碰其他 cookie。`)) return
+        const confirmed = await confirm.ask({ title: '清理旧的认证 Cookie？', body: `会保留当前端口的登录，只删除其他 ${Math.max(0, count - 1)} 条 dsh-auth-*；不会碰其他 cookie。`, confirmLabel: '清理' })
+        if (!confirmed) return
         setCleaningCookies(true)
         setCleanupMessage('')
         fetch('/lingeye/environment', {
@@ -1062,13 +1134,13 @@ window.__ModuleLoader__.load({
         const target = group.sessions[0]
         const workspace = clientCtx && clientCtx.uiWorkspace
         if (target === undefined || workspace === undefined || typeof workspace.archiveSession !== 'function') return
-        const confirmed = window.confirm(`归档会话「${target.title}」？\n\n归档后它会从灵眼操控中心和侧栏消失，数据不会删除，可在归档中恢复。`)
+        const confirmed = await confirm.ask({ title: `归档会话「${target.title}」？`, body: '归档后会从灵眼操控中心和侧栏消失，数据不会删除，可在归档中恢复。', confirmLabel: '归档' })
         if (!confirmed) return
         try {
           await workspace.archiveSession(target.id)
           refresh()
         } catch (error) {
-          window.alert(`归档失败：${error instanceof Error ? error.message : String(error)}`)
+          await confirm.ask({ title: '归档失败', body: error instanceof Error ? error.message : String(error), confirmLabel: '知道了', cancelLabel: null })
         }
       }
       const unlink = async (group) => {
@@ -1076,10 +1148,10 @@ window.__ModuleLoader__.load({
         const sessions = clientCtx && clientCtx.sessions
         if (first === undefined || sessions === undefined) return
         if (!first.retained) {
-          window.alert('这个项目当前没有活跃会话可执行清理。请先打开任一关联会话，再回来解除分组。')
+          await confirm.ask({ title: '没有活跃会话', body: '这个项目当前没有活跃会话可执行清理。请先打开任一关联会话，再回来解除分组。', confirmLabel: '知道了', cancelLabel: null })
           return
         }
-        const confirmed = window.confirm(`解除项目「${group.id}」的分组？\n\n只清除 projectId 关联，保留所有会话、资产、证据与漏洞。\n会在第一个关联会话中发起一轮清理指令，由指挥官执行 ly_project_unlink。`)
+        const confirmed = await confirm.ask({ title: `解除项目「${group.id}」的分组？`, body: '只清除 projectId 关联，保留所有会话、资产、证据与漏洞。会在第一个关联会话中发起一轮清理指令，由指挥官执行 ly_project_unlink。', confirmLabel: '解除分组' })
         if (!confirmed) return
         try {
           const accepted = await sessions.using(first.id, { source: 'lingeye-projects' }, async reference => {
@@ -1089,12 +1161,12 @@ window.__ModuleLoader__.load({
             }], 'queue')
           })
           if (accepted !== undefined && accepted.ok === false) {
-            window.alert(`解除分组未发送：${accepted.error?.message || '会话拒绝了这次指令'}`)
+            await confirm.ask({ title: '解除分组未发送', body: accepted.error?.message || '会话拒绝了这次指令', confirmLabel: '知道了', cancelLabel: null })
             return
           }
           refresh()
         } catch (error) {
-          window.alert(`解除分组失败：${error instanceof Error ? error.message : String(error)}`)
+          await confirm.ask({ title: '解除分组失败', body: error instanceof Error ? error.message : String(error), confirmLabel: '知道了', cancelLabel: null })
         }
       }
       return h('div', { style: { ...S.root, maxWidth: '1120px', margin: '0 auto' } },
@@ -1184,7 +1256,7 @@ window.__ModuleLoader__.load({
                 group.standalone
                   ? h('button', { type: 'button', style: S.button, title: '归档会话后从项目面板移除，可在归档中恢复', onClick: () => { void archive(group) } }, '归档会话')
                   : h('button', { type: 'button', style: S.button, onClick: () => { void unlink(group) } }, '解除分组'))))
-      ))
+      ), confirm.dialog)
     }
 
     function LingeyeView(props) {
@@ -1217,7 +1289,7 @@ window.__ModuleLoader__.load({
           Promise.resolve(sessions.refreshProjections(props.sessionId)).catch(() => undefined)
         }
       }
-      return h('div', { style: S.root, 'data-testid': 'lingeye-view' },
+      return h('div', { style: S.root, 'data-testid': 'lingeye-view', 'data-lingeye-view': '' },
         h('header', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
           h('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '8px' } },
             h('h2', { style: { margin: 0, fontSize: '16px' } }, (data.engagement && data.engagement.target) || '灵眼'),
@@ -1271,6 +1343,13 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       clientCtx = ctx
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'lingeye:dictionaries')
+      ctx.effect(() => {
+        const style = document.createElement('style')
+        style.dataset.lingeye = 'width-handle'
+        style.textContent = ':has([data-lingeye-view]) [data-width-handle] { display: none !important; }'
+        document.head.append(style)
+        return () => style.remove()
+      }, 'lingeye:width-handle')
       const t = ctx.locale.bind(NS)
       const sessions = ctx.sessions
       ctx.slots.inject('conversation.view', () => {

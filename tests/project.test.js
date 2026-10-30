@@ -76,3 +76,13 @@ test('commander persona does not depend on the resumed-session model variable', 
 test('submit returns ids for records a later submission may reference', () => {
   assert.match(read('store.js'), /ids: \{[\s\S]*evidence: evidence\.map/)
 })
+
+
+test('mode UI polish stays scoped and does not use native dialogs', () => {
+  const client = read('client.js')
+  assert.doesNotMatch(client, /window\.(confirm|alert)/)
+  assert.match(client, /data-lingeye-view/)
+  assert.match(client, /data-width-handle/)
+  assert.match(client, /-10px 0 18px -8px/)
+  assert.match(client, /function useConfirm/)
+})
