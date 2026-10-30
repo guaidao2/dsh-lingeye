@@ -26,3 +26,11 @@ test('control center exposes the expected tabs and manual cookie cleanup', () =>
   assert.match(client, /action: 'cleanup-cookies'/)
   assert.match(client, /confirm: true/)
 })
+
+
+test('0.6 decision-layer tools are registered', () => {
+  const commander = readFileSync(new URL('../src/commander.js', import.meta.url), 'utf8')
+  for (const name of ['ly_concept_add', 'ly_concept_link', 'ly_graph_prune', 'ly_graph_decay', 'ly_causal_audit', 'ly_counterfactual', 'ly_evidence_retire']) {
+    assert.match(commander, new RegExp(`name: '${name}'`))
+  }
+})

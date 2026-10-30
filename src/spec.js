@@ -96,7 +96,7 @@ export const factSchema = z.object({
   provenance: z.string().default(''),
   evidenceIds: z.array(id).default([]),
   assetIds: z.array(id).default([]),
-  state: z.enum(['confirmed', 'dismissed']).default('confirmed'),
+  state: z.enum(['confirmed', 'dismissed', 'stale']).default('confirmed'),
   createdAt: iso,
 })
 
@@ -152,6 +152,9 @@ export const edgeSchema = z.object({
   kind: z.enum(EDGE_KINDS),
   srcId: id,
   dstId: id,
+  weight: z.number().min(0).max(1).default(0.5),
+  pheromone: z.number().min(0).max(1).default(0.5),
+  updatedAt: iso.optional(),
 })
 
 export const flowSchema = z.object({
@@ -178,6 +181,10 @@ export const evidenceSchema = z.object({
   layers: z.array(z.string()).default([]),
   intentId: id.optional(),
   findingId: id.optional(),
+  state: z.enum(['active', 'retired']).default('active'),
+  version: z.number().int().positive().default(1),
+  retiredAt: iso.optional(),
+  retiredReason: z.string().default(''),
   createdAt: iso,
 })
 
@@ -262,6 +269,42 @@ export const mcpServerSchema = z.object({
   updatedAt: iso,
 })
 
+
+/** A real project entity; sessions reference it through engagement.projectId. */
+export const projectSchema = z.object({
+  id,
+  name: z.string().min(1),
+  description: z.string().default(''),
+  target: z.string().default(''),
+  status: z.enum(['active', 'archived', 'done']).default('active'),
+  createdAt: iso,
+  updatedAt: iso,
+})
+
+
+/** A concept node: a reusable security idea, condition, or relation template. */
+export const conceptSchema = z.object({
+  id,
+  name: z.string().min(1),
+  kind: z.enum(['condition', 'technique', 'impact', 'asset-class', 'assumption', 'other']).default('other'),
+  summary: z.string().default(''),
+  confidence: z.number().min(0).max(1).default(0.5),
+  evidenceIds: z.array(z.string()).default([]),
+  createdAt: iso,
+  updatedAt: iso,
+})
+
+/** A typed relation between two concepts. */
+export const conceptRelationSchema = z.object({
+  id,
+  fromId: z.string().min(1),
+  toId: z.string().min(1),
+  kind: z.enum(['requires', 'enables', 'leads-to', 'contradicts', 'refines', 'related']).default('related'),
+  confidence: z.number().min(0).max(1).default(0.5),
+  evidenceIds: z.array(z.string()).default([]),
+  createdAt: iso,
+})
+
 /** The whole 灵眼 domain. */
 export const lingeyeDomainSpec = defineDomain({
   name: 'lingeye',
@@ -284,5 +327,8 @@ export const lingeyeDomainSpec = defineDomain({
     project_tombstones: domainTable(projectTombstoneSchema),
     environment_settings: domainTable(environmentSettingsSchema),
     mcp_servers: domainTable(mcpServerSchema),
+    projects: domainTable(projectSchema),
+    concepts: domainTable(conceptSchema),
+    concept_relations: domainTable(conceptRelationSchema),
   },
 })

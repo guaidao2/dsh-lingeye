@@ -38,7 +38,7 @@ test('role presets are declared, allowed, and inserted before the commander', ()
   const presets = readPreset()
   const commanderAt = presets.search(/- id: preset-lingeye\r?\n/)
   assert.ok(commanderAt > 0)
-  for (const id of ['lingeye-intel', 'lingeye-enumerator', 'lingeye-threat-modeler']) {
+  for (const id of ['lingeye-intel', 'lingeye-enumerator', 'lingeye-threat-modeler', 'lingeye-pre', 'lingeye-post', 'lingeye-evasion']) {
     const at = presets.search(new RegExp(`- id: preset-${id}\\r?\\n`))
     assert.ok(at >= 0, `missing preset ${id}`)
     assert.ok(at < commanderAt, `${id} must precede the commander preset`)

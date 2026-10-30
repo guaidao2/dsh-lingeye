@@ -550,31 +550,29 @@ window.__ModuleLoader__.load({
           }),
           nodes.map(node => {
             const color = fillOf(node)
-            const isSelected = selectedId === node.id
             return h('foreignObject', {
               key: node.id, x: node.x, y: node.y, width: node.w, height: node.h,
               style: { overflow: 'visible' },
               onPointerDown: event => event.stopPropagation(),
-              onClick: event => { event.stopPropagation(); setSelectedId(isSelected ? null : node.id) },
+              onClick: event => { event.stopPropagation(); setSelectedId(node.id) },
             },
             h('div', {
               role: 'button',
               tabIndex: 0,
               'aria-label': `${KIND_LABEL[node.kind] || node.kind} ${node.label || node.id}`,
+              'aria-pressed': selectedId === node.id,
               style: {
                 boxSizing: 'border-box', width: '100%', height: '100%', display: 'flex', flexDirection: 'column',
                 justifyContent: 'center', gap: '3px', padding: '8px 12px 8px 16px', cursor: 'pointer',
-                borderRadius: '10px', border: `1px solid ${isSelected ? color : C.border}`,
+                borderRadius: '10px', border: `1px solid ${C.border}`,
                 borderLeft: `4px solid ${color}`, background: C.layer,
-                boxShadow: isSelected
-                  ? `0 0 0 2px color-mix(in srgb, ${color} 20%, transparent), -10px 0 18px -8px color-mix(in srgb, ${color} 40%, transparent)`
-                  : `-10px 0 18px -8px color-mix(in srgb, ${color} 40%, transparent)`,
+                boxShadow: `-10px 0 18px -8px color-mix(in srgb, ${color} 40%, transparent)`,
                 userSelect: 'none', WebkitUserSelect: 'none',
               },
               onKeyDown: event => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault()
-                  setSelectedId(isSelected ? null : node.id)
+                  setSelectedId(node.id)
                 }
               },
             },
@@ -1014,6 +1012,7 @@ window.__ModuleLoader__.load({
       const archived = new Set((workspaces && workspaces.archivedSessionIds) || [])
       const refreshed = React.useRef(false)
       const [tab, setTab] = React.useState('overview')
+      const [query, setQuery] = React.useState('')
       const [environment, setEnvironment] = React.useState(null)
       const [environmentError, setEnvironmentError] = React.useState('')
       const [gitbashEnabled, setGitbashEnabled] = React.useState(false)
@@ -1022,6 +1021,17 @@ window.__ModuleLoader__.load({
       const [environmentSaveError, setEnvironmentSaveError] = React.useState('')
       const [cleaningCookies, setCleaningCookies] = React.useState(false)
       const [cleanupMessage, setCleanupMessage] = React.useState('')
+      const [projectEntities, setProjectEntities] = React.useState([])
+      const [projectDraft, setProjectDraft] = React.useState(null)
+      const [projectSaving, setProjectSaving] = React.useState(false)
+      const [projectError, setProjectError] = React.useState('')
+      const projectField = { boxSizing: 'border-box', padding: '5px 7px', borderRadius: '6px', border: C.border, background: C.layer2, color: C.text, fontSize: '11px' }
+      const loadProjects = () => {
+        fetch('/lingeye/projects', { cache: 'no-store', credentials: 'same-origin' })
+          .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+          .then(value => setProjectEntities(Array.isArray(value.projects) ? value.projects : []))
+          .catch(() => undefined)
+      }
       const loadEnvironment = () => {
         fetch('/lingeye/environment', { cache: 'no-store', credentials: 'same-origin' })
           .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
@@ -1078,18 +1088,22 @@ window.__ModuleLoader__.load({
       })
       const refresh = () => {
         loadEnvironment()
+        loadProjects()
         const sessions = clientCtx && clientCtx.sessions
         if (lingeyeIds.length === 0 || sessions === undefined) return
         Promise.allSettled(lingeyeIds.map(id => Promise.resolve(sessions.refreshProjections(id))))
       }
       React.useEffect(() => {
         loadEnvironment()
+        loadProjects()
         if (refreshed.current || lingeyeIds.length === 0) return
         refreshed.current = true
         refresh()
       }, [lingeyeIds.length])
       const groups = React.useMemo(() => {
         const map = new Map()
+        const projectRows = new Map()
+        for (const project of projectEntities) projectRows.set(project.id, project)
         for (const id of lingeyeIds) {
           const state = list.projectionsBySession && list.projectionsBySession[id]
           const data = state && state.values && state.values.lingeye
@@ -1106,6 +1120,7 @@ window.__ModuleLoader__.load({
               target: (data.engagement && data.engagement.target) || projectId,
               objective: (data.engagement && data.engagement.objective) || '',
               sessions: [],
+              project: projectRows.get(projectId),
               latest: 0,
               intents: 0,
               facts: 0,
@@ -1125,6 +1140,43 @@ window.__ModuleLoader__.load({
           if (Number.isFinite(stamp)) group.latest = Math.max(group.latest, stamp)
         }
         return [...map.values()].sort((a, b) => b.latest - a.latest)
+      }, [list, projectEntities])
+      const timeline = React.useMemo(() => {
+        const events = []
+        for (const id of lingeyeIds) {
+          const data = list.projectionsBySession?.[id]?.values?.lingeye
+          if (!data) continue
+          const label = data.engagement?.projectId || data.engagement?.target || id
+          for (const item of data.activity || []) {
+            events.push({ key: `a-${id}-${item.id}`, time: Date.parse(item.createdAt || ''), kind: item.kind || 'activity', text: item.summary || item.detail || '', sessionId: id, label })
+          }
+          for (const intent of data.intents || []) {
+            if (intent.state === 'open' || intent.state === 'running' || intent.state === 'blocked') {
+              events.push({ key: `i-${id}-${intent.id}`, time: Date.parse(intent.updatedAt || intent.createdAt || ''), kind: 'intent', text: `${intent.state} · ${intent.title}`, sessionId: id, label })
+            }
+          }
+        }
+        return events.filter(event => Number.isFinite(event.time)).sort((a, b) => b.time - a.time).slice(0, 120)
+      }, [list])
+      const visibleTimeline = timeline.filter(event => query.trim() === '' || `${event.label} ${event.text}`.toLowerCase().includes(query.trim().toLowerCase()))
+      const roleDefs = [
+        ['lingeye-worker', '执行'], ['lingeye-retest', '复测'], ['lingeye-intel', '情报'],
+        ['lingeye-enumerator', '枚举'], ['lingeye-threat-modeler', '威胁建模'],
+        ['lingeye-pre', '前渗透'], ['lingeye-post', '后渗透'], ['lingeye-evasion', '降噪'],
+      ]
+      const roleRows = roleDefs.map(([id, label]) => {
+        const sessions = (list.ids || []).filter(rowId => isLingeyePreset(presetOf(list.byId[rowId])) && presetOf(list.byId[rowId]) === id)
+        return { id, label, sessions: sessions.length }
+      })
+      const conceptRows = React.useMemo(() => {
+        const concepts = []
+        const relations = []
+        for (const id of lingeyeIds) {
+          const data = list.projectionsBySession?.[id]?.values?.lingeye
+          for (const item of data?.concepts ?? []) concepts.push({ ...item, sessionId: id })
+          for (const item of data?.concept_relations ?? []) relations.push({ ...item, sessionId: id })
+        }
+        return { concepts, relations }
       }, [list])
       const open = (sessionId) => {
         const workspace = clientCtx && clientCtx.uiWorkspace
@@ -1141,6 +1193,65 @@ window.__ModuleLoader__.load({
           refresh()
         } catch (error) {
           await confirm.ask({ title: '归档失败', body: error instanceof Error ? error.message : String(error), confirmLabel: '知道了', cancelLabel: null })
+        }
+      }
+      const editProject = (group) => {
+        setProjectError('')
+        setProjectDraft({
+          projectId: group.id,
+          name: (group.project && group.project.name) || group.target,
+          description: (group.project && group.project.description) || group.objective || '',
+          target: (group.project && group.project.target) || group.target || '',
+          status: (group.project && group.project.status) || 'active',
+          sessionId: group.sessions[0] ? group.sessions[0].id : '',
+        })
+      }
+      const saveProject = async () => {
+        if (projectDraft === null) return
+        setProjectSaving(true); setProjectError('')
+        try {
+          const response = await fetch('/lingeye/projects', {
+            method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ projectId: projectDraft.projectId, name: projectDraft.name, description: projectDraft.description, target: projectDraft.target, status: projectDraft.status }),
+          })
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`)
+          setProjectDraft(null)
+          loadProjects()
+          refresh()
+        } catch (error) {
+          setProjectError(error instanceof Error ? error.message : String(error))
+        } finally { setProjectSaving(false) }
+      }
+      const deleteProject = async () => {
+        if (projectDraft === null || projectDraft.sessionId === '') return
+        const confirmed = await confirm.ask({ title: `删除项目「${projectDraft.name}」？`, body: '会删除项目实体并解除所有会话关联；会话、证据、漏洞数据保留。', confirmLabel: '删除项目', danger: true })
+        if (!confirmed) return
+        setProjectSaving(true); setProjectError('')
+        try {
+          const response = await fetch('/lingeye/projects', {
+            method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'delete', projectId: projectDraft.projectId, sessionId: projectDraft.sessionId }),
+          })
+          const value = await response.json()
+          if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`)
+          setProjectDraft(null)
+          loadProjects()
+          refresh()
+        } catch (error) {
+          setProjectError(error instanceof Error ? error.message : String(error))
+        } finally { setProjectSaving(false) }
+      }
+      const archiveGroup = async (group) => {
+        const workspace = clientCtx && clientCtx.uiWorkspace
+        if (workspace === undefined || typeof workspace.archiveSession !== 'function') return
+        const confirmed = await confirm.ask({ title: `批量归档「${(group.project && group.project.name) || group.target}」的 ${group.sessions.length} 个会话？`, body: '只归档会话，不删除数据，可在归档中恢复。', confirmLabel: '批量归档' })
+        if (!confirmed) return
+        try {
+          for (const session of group.sessions) await workspace.archiveSession(session.id)
+          refresh()
+        } catch (error) {
+          await confirm.ask({ title: '批量归档失败', body: error instanceof Error ? error.message : String(error), confirmLabel: '知道了', cancelLabel: null })
         }
       }
       const unlink = async (group) => {
@@ -1180,12 +1291,49 @@ window.__ModuleLoader__.load({
           badge(`${groups.filter(group => group.standalone !== true).length} 项目组`, C.muted),
           badge(`${groups.reduce((sum, group) => sum + group.findings, 0)} 漏洞`, C.muted)),
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '12px', borderBottom: C.border, paddingBottom: '6px' } },
-          [['overview', '总览'], ['projects', '项目'], ['environment', '环境'], ['mcp', 'MCP']].map(([id, label]) =>
+          [['overview', '总览'], ['projects', '项目'], ['timeline', '时间线'], ['roles', '角色'], ['environment', '环境'], ['mcp', 'MCP']].map(([id, label]) =>
             h('button', {
               key: id, type: 'button', onClick: () => setTab(id),
               style: { ...S.tab, flex: '0 0 auto', ...(tab === id ? S.tabActive : {}) },
             }, label))),
         tab === 'mcp' ? h(McpPanel) : null,
+        h('section', { style: { display: tab === 'timeline' ? 'block' : 'none', ...S.card, marginBottom: '12px' } },
+          h('div', { style: S.itemHead }, h('span', { style: S.itemTitle }, '实时时间线 / 跨项目检索')),
+          h('input', { value: query, onChange: event => setQuery(event.target.value), placeholder: '搜索项目、会话、活动或意图…', style: { width: '100%', boxSizing: 'border-box', marginTop: '8px', padding: '6px 8px', borderRadius: '6px', border: C.border, background: C.layer2, color: C.text, fontSize: '12px' } }),
+          h('div', { style: { display: 'grid', gap: '4px', marginTop: '8px', maxHeight: '440px', overflow: 'auto' } },
+            visibleTimeline.length === 0 ? h('p', { style: S.faint }, '没有匹配的事件。') : visibleTimeline.map(event => h('div', { key: event.key, style: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px', padding: '5px 0', borderBottom: C.border } },
+              h('span', { style: { ...S.faint, fontSize: '11px' } }, new Date(event.time).toLocaleString()),
+              h('div', null, h('div', { style: { fontSize: '12px', color: C.text } }, event.text), h('div', { style: { ...S.faint, fontSize: '10px' } }, `${event.kind} · ${event.label}`)))))),
+        h('section', { style: { display: tab === 'roles' ? 'block' : 'none', ...S.card, marginBottom: '12px' } },
+          h('div', { style: S.itemHead }, h('span', { style: S.itemTitle }, '角色编排')),
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', marginTop: '8px' } },
+            roleRows.map(role => h('div', { key: role.id, style: { border: C.border, borderRadius: '8px', padding: '8px 10px' } },
+              h('div', { style: S.itemHead }, h('span', { style: S.itemTitle }, role.label), badge(`${role.sessions} 会话`, C.muted)),
+              h('div', { style: { ...S.faint, fontSize: '11px' } }, role.id)))),
+          h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '14px' } }, h('span', { style: S.itemTitle }, '概念 / 关系'), badge(`${conceptRows.concepts.length} 概念 · ${conceptRows.relations.length} 关系`, C.muted)),
+          h('div', { style: { display: 'grid', gap: '4px', marginTop: '6px' } },
+            conceptRows.concepts.length === 0 ? h('p', { style: S.faint }, '还没有概念节点。') : conceptRows.concepts.slice(0, 30).map(concept => h('div', { key: `${concept.sessionId}-${concept.id}`, style: { fontSize: '12px', padding: '5px 0', borderBottom: C.border } },
+              h('span', { style: { color: C.text } }, concept.name), h('span', { style: S.faint }, ` · ${concept.kind} · ${(concept.confidence * 100).toFixed(0)}%`)))),
+          conceptRows.relations.length > 0 ? h('div', { style: { marginTop: '8px' } }, h('div', { style: S.faint }, '关系模板'),
+            conceptRows.relations.slice(0, 30).map(relation => h('div', { key: `${relation.sessionId}-${relation.id}`, style: { fontSize: '11px', padding: '3px 0' } }, `${relation.fromId} → ${relation.toId} · ${relation.kind}`))) : null),
+        projectDraft !== null ? h('section', { style: { ...S.card, marginBottom: '12px' } },
+          h('div', { style: S.itemHead }, h('span', { style: S.itemTitle }, '项目设置'), h('span', { style: S.faint }, projectDraft.projectId)),
+          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', marginTop: '8px' } },
+            h('label', { style: { fontSize: '11px' } }, '项目名称',
+              h('input', { style: { ...projectField, width: '100%' }, value: projectDraft.name, onChange: event => setProjectDraft({ ...projectDraft, name: event.target.value }) })),
+            h('label', { style: { fontSize: '11px' } }, '目标',
+              h('input', { style: { ...projectField, width: '100%' }, value: projectDraft.target, onChange: event => setProjectDraft({ ...projectDraft, target: event.target.value }) })),
+            h('label', { style: { fontSize: '11px' } }, '状态',
+              h('select', { style: { ...projectField, width: '100%' }, value: projectDraft.status, onChange: event => setProjectDraft({ ...projectDraft, status: event.target.value }) },
+                h('option', { value: 'active' }, '进行中'), h('option', { value: 'archived' }, '归档'), h('option', { value: 'done' }, '完成')))),
+          h('label', { style: { display: 'block', fontSize: '11px', marginTop: '8px' } }, '项目描述',
+            h('textarea', { style: { ...projectField, width: '100%', minHeight: '56px' }, value: projectDraft.description, onChange: event => setProjectDraft({ ...projectDraft, description: event.target.value }) })),
+          projectError ? h('p', { style: { ...S.faint, color: C.error } }, projectError) : null,
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', marginTop: '8px' } },
+            h('button', { type: 'button', style: { ...S.button, color: C.error, borderColor: C.error }, disabled: projectSaving, onClick: () => { void deleteProject() } }, '删除项目'),
+            h('div', { style: { display: 'flex', gap: '8px' } },
+              h('button', { type: 'button', style: S.button, onClick: () => setProjectDraft(null) }, '取消'),
+              h('button', { type: 'button', style: S.button, disabled: projectSaving, onClick: () => { void saveProject() } }, projectSaving ? '保存中…' : '保存项目')))) : null,
         h('section', { style: { display: tab === 'overview' || tab === 'environment' ? 'block' : 'none', ...S.card, marginBottom: '12px' } },
           h('div', { style: S.itemHead },
             h('span', { style: S.itemTitle }, '环境增强 / 维护'),
@@ -1234,11 +1382,12 @@ window.__ModuleLoader__.load({
         groups.length === 0
           ? h('div', { style: { display: tab === 'overview' || tab === 'projects' ? 'block' : 'none', ...S.card } }, h('p', { style: S.faint }, '还没有可聚合的灵眼项目。先在灵眼会话里调用 ly_start，并用 projectId 把同一项目的多个会话关联起来。'))
           : h('div', { style: { display: tab === 'overview' || tab === 'projects' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' } },
-            groups.map(group => h('section', { key: group.id, style: S.card },
-              h('div', { style: S.itemHead },
-                h('span', { style: S.itemTitle }, group.target),
-                h('span', { style: S.faint }, group.id)),
-              group.objective ? h('p', { style: S.detail }, group.objective) : null,
+            groups.map(group => h('section', { key: group.id, style: { ...S.card, minWidth: 0, overflow: 'hidden' } },
+              h('div', { style: { ...S.itemHead, minWidth: 0 } },
+                h('span', { style: { ...S.itemTitle, minWidth: 0, overflowWrap: 'anywhere' } }, (group.project && group.project.name) || group.target),
+                h('span', { style: { ...S.faint, minWidth: 0, overflowWrap: 'anywhere' } }, group.id),
+                group.project && group.project.status !== 'active' ? badge(group.project.status, C.muted) : null),
+              (group.project && group.project.description) || group.objective ? h('p', { style: { ...S.detail, overflowWrap: 'anywhere' } }, (group.project && group.project.description) || group.objective) : null,
               h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } },
                 badge(`${group.sessions.length} 会话`, C.muted),
                 badge(`${group.intents} 意图`, C.muted),
@@ -1252,7 +1401,8 @@ window.__ModuleLoader__.load({
                   onClick: () => open(session.id),
                 }, session.title))),
               group.latest > 0 ? h('div', { style: { ...S.faint, marginTop: '8px', fontSize: '11px' } }, `最近写入：${new Date(group.latest).toLocaleString()}`) : null,
-              h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '8px' } },
+              h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '8px' } },
+                h('button', { type: 'button', style: S.button, onClick: () => editProject(group) }, '项目设置'),
                 group.standalone
                   ? h('button', { type: 'button', style: S.button, title: '归档会话后从项目面板移除，可在归档中恢复', onClick: () => { void archive(group) } }, '归档会话')
                   : h('button', { type: 'button', style: S.button, onClick: () => { void unlink(group) } }, '解除分组'))))

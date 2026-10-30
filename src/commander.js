@@ -108,6 +108,128 @@ export function registerCommander(ctx) {
   }))
 
   ctx.tools.register(tool({
+    name: 'ly_project_list',
+    description: 'List real project entities and their settings (name, description, target, status).',
+    parameters: {},
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async () => ({ projects: await store.projects() }),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_project_save',
+    description: 'Create or update a project entity. Sessions still link through projectId; this only changes project-level metadata.',
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Project id used by engagement.projectId.' },
+      name: { type: 'string', description: 'Human-facing project name.' },
+      description: { type: 'string', description: 'Project description.' },
+      target: { type: 'string', description: 'Project target summary.' },
+      status: { type: 'string', enum: ['active', 'archived', 'done'], description: 'Project status.' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    presentResult: card('灵眼项目设置'),
+    execute: async (args) => store.saveProject(args),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_project_delete',
+    description: 'Delete a project entity and unlink every session using it. Session engagement data is preserved. Only a session currently linked to the project may call this.',
+    parameters: {
+      projectId: { type: 'string', required: true, description: 'Project id to delete.' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    presentResult: card('灵眼项目已删除'),
+    execute: async (args, exec) => store.deleteProject(args.projectId, sessionIdOf(exec)),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_graph_decay',
+    description: 'Evaporate edge pheromone by a factor (default 0.95). Low-value trails fade before pruning.',
+    parameters: {
+      factor: { type: 'number', description: 'Multiplier 0..1 (default 0.95).' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (args, exec) => store.decayPheromone(sessionIdOf(exec), args.factor ?? 0.95),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_concept_add',
+    description: 'Add a reusable concept node (condition, technique, impact, asset class, assumption or other) with optional evidence.',
+    parameters: {
+      name: { type: 'string', required: true, description: 'Concept name.' },
+      kind: { type: 'string', enum: ['condition', 'technique', 'impact', 'asset-class', 'assumption', 'other'], description: 'Concept kind.' },
+      summary: { type: 'string', description: 'What this concept means and when it applies.' },
+      confidence: { type: 'number', description: 'Belief strength 0..1.' },
+      evidenceIds: { type: 'array', description: 'Evidence supporting the concept.', items: { type: 'string' } },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (args, exec) => store.addConcept(sessionIdOf(exec), args),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_concept_link',
+    description: 'Link two concepts with a typed relation (requires, enables, leads-to, contradicts, refines, related).',
+    parameters: {
+      fromId: { type: 'string', required: true, description: 'Source concept id.' },
+      toId: { type: 'string', required: true, description: 'Target concept id.' },
+      kind: { type: 'string', enum: ['requires', 'enables', 'leads-to', 'contradicts', 'refines', 'related'], description: 'Relation kind.' },
+      confidence: { type: 'number', description: 'Belief strength 0..1.' },
+      evidenceIds: { type: 'array', description: 'Evidence supporting the relation.', items: { type: 'string' } },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (args, exec) => store.linkConcepts(sessionIdOf(exec), args),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_concept_list',
+    description: 'List concept nodes and typed relations.',
+    parameters: {},
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (_args, exec) => store.concepts(sessionIdOf(exec)),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_graph_prune',
+    description: 'Prune exploration edges whose weight and pheromone are both below the threshold. Concept nodes are kept.',
+    parameters: {
+      threshold: { type: 'number', description: 'Threshold 0..1 (default 0.2).' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (args, exec) => store.pruneGraph(sessionIdOf(exec), args.threshold ?? 0.2),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_evidence_retire',
+    description: 'Retire one evidence record, mark dependent facts stale, and bump dependent findings to pending with a new evidence version.',
+    parameters: {
+      evidenceId: { type: 'string', required: true, description: 'Evidence id to retire.' },
+      reason: { type: 'string', description: 'Why the evidence is no longer valid.' },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (args, exec) => store.retireEvidence(sessionIdOf(exec), args.evidenceId, args.reason ?? ''),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_causal_audit',
+    description: 'Audit the recorded graph for directed cycles and edges whose endpoints no longer exist. Read-only.',
+    parameters: {},
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (_args, exec) => {
+      const state = await store.next(sessionIdOf(exec))
+      return { causal: state.causal ?? { cycles: [], staleEdges: 0 }, goalPaths: state.goalPaths ?? [] }
+    },
+  }))
+
+  ctx.tools.register(tool({
+    name: 'ly_counterfactual',
+    description: 'Replay the belief state without selected facts/evidence ids and report changes in hypotheses, coverage and edges. Read-only.',
+    parameters: {
+      removeIds: { type: 'array', description: 'Fact or evidence ids to remove from the replay.', items: { type: 'string' }, required: true },
+    },
+    output: { schema: objectOutput, render: jsonRender },
+    execute: async (args, exec) => store.counterfactual(sessionIdOf(exec), args.removeIds),
+  }))
+
+  ctx.tools.register(tool({
     name: 'ly_state',
     description: 'Read the full engagement state (engagement, goals, intents, facts, findings, assets, evidence, flows, retests, activity) and refresh the Web tab. Call it after subagent submissions or any notable change.',
     parameters: {},

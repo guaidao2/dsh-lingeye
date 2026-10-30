@@ -163,6 +163,46 @@ export function apply(ctx, config = {}) {
     return state
   }
 
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact',
+    path: '/lingeye/projects',
+    handler: async (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'POST') {
+        writeJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      if (req.method === 'GET') {
+        try {
+          writeJson(res, 200, { projects: await ctx.lingeyeStore.projects() })
+        } catch (error) {
+          writeJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+        }
+        return
+      }
+      if (!sameOrigin(req)) {
+        writeJson(res, 403, { error: 'cross-origin request refused' })
+        return
+      }
+      try {
+        const body = await readJsonBody(req)
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new Error('request body must be a JSON object')
+        if (body.action === 'delete') {
+          if (typeof body.sessionId !== 'string' || body.sessionId === '') throw new Error('sessionId is required')
+          const ids = await ctx.lingeyeStore.projectSessionIds(body.projectId)
+          if (!ids.includes(body.sessionId)) throw new Error('session is not linked to this project')
+          await ctx.lingeyeStore.deleteProject(body.projectId, body.sessionId)
+          writeJson(res, 200, { deleted: body.projectId, projects: await ctx.lingeyeStore.projects() })
+          return
+        }
+        const project = await ctx.lingeyeStore.saveProject(body)
+        writeJson(res, 200, { project, projects: await ctx.lingeyeStore.projects() })
+      } catch (error) {
+        writeJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      }
+    },
+  }))
+
   ctx.effect(() => webServer.register({
     kind: 'exact',
     path: '/lingeye/environment',

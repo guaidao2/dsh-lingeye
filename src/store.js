@@ -26,6 +26,7 @@ import {
 import { registerProjection } from './projection.js'
 import { cleanRecordPayload, trimProjectionState } from './payload.js'
 import { buildReport, buildExportBundle } from './report.js'
+import { findCycles, hypothesisGroups, informationGain, coverageOpportunities, goalPaths, counterfactual as replayCounterfactual } from './reasoning.js'
 
 /** Node/browser-neutral timestamp. */
 function now() {
@@ -52,6 +53,8 @@ const ID_PREFIX = {
   retest: 'retest',
   constraint: 'constraint',
   path: 'path',
+  concept: 'concept',
+  relation: 'relation',
 }
 
 /** Table owning each record kind. */
@@ -69,6 +72,8 @@ const TABLE_OF = {
   retest: 'retests',
   constraint: 'constraints',
   path: 'attack_paths',
+  concept: 'concepts',
+  relation: 'concept_relations',
 }
 
 /** Every session-scoped table. */
@@ -584,8 +589,9 @@ export default class LingeyeStore extends Service {
     }
     data.edges = await this.rows(sessionId, 'edges')
     data.attackPaths = await this.rows(sessionId, TABLE_OF.path)
-    const tombstones = await this.domain()
-    data.projectTombstones = [...tombstones.table('project_tombstones').entries()].map(([, row]) => ({ sessionId: row.sessionId, projectId: row.projectId }))
+    const domain = await this.domain()
+    data.projectTombstones = [...domain.table('project_tombstones').entries()].map(([, row]) => ({ sessionId: row.sessionId, projectId: row.projectId }))
+    data.projects = [...domain.table('projects').entries()].map(([, row]) => row)
     data.engagement = engagement ?? null
     return data
   }
@@ -601,6 +607,8 @@ export default class LingeyeStore extends Service {
       evidence: data.evidence.length,
       flows: data.flows.length,
       retests: data.retests.length,
+      concepts: (data.concepts ?? []).length,
+      relations: (data.concept_relations ?? []).length,
     }
   }
 
@@ -659,7 +667,10 @@ export default class LingeyeStore extends Service {
       }
       const domain = await this.domain()
       await domain.table('engagements').put(sessionId, engagement)
-      if (engagement.projectId !== '') await domain.table('project_tombstones').delete(`${sessionId}:${engagement.projectId}`)
+      if (engagement.projectId !== '') {
+        await domain.table('project_tombstones').delete(`${sessionId}:${engagement.projectId}`)
+        await this.ensureProject(engagement.projectId, { name: engagement.projectId, target: engagement.target })
+      }
       const goalId = await this.nextId(sessionId, 'goal')
       await domain.table('goals').put(recordKey(sessionId, goalId), {
         id: goalId,
@@ -696,9 +707,175 @@ export default class LingeyeStore extends Service {
       const next = { ...engagement, projectId: String(projectId ?? '').trim() }
       const domain = await this.domain()
       await domain.table('engagements').put(sessionId, next)
-      if (next.projectId !== '') await domain.table('project_tombstones').delete(`${sessionId}:${next.projectId}`)
+      if (next.projectId !== '') {
+        await domain.table('project_tombstones').delete(`${sessionId}:${next.projectId}`)
+        await this.ensureProject(next.projectId, { name: next.projectId, target: next.target })
+      }
       return next
     })
+  }
+
+  /** Add one reusable concept node. */
+  async addConcept(sessionId, input = {}) {
+    return this.enqueue(sessionId, async () => {
+      await this.requireEngagement(sessionId)
+      const name = required(input.name, 'concept name')
+      const evidenceIds = Array.isArray(input.evidenceIds) ? [...new Set(input.evidenceIds)] : []
+      for (const evidenceId of evidenceIds) {
+        if (await this.record(sessionId, 'evidence', evidenceId) === undefined) throw new Error(`unknown evidence ${evidenceId}`)
+      }
+      const id = await this.nextId(sessionId, 'concept')
+      const stamp = now()
+      const concept = {
+        id, sessionId, name,
+        kind: ['condition', 'technique', 'impact', 'asset-class', 'assumption', 'other'].includes(input.kind) ? input.kind : 'other',
+        summary: input.summary ?? '',
+        confidence: confidenceOf(input.confidence, 0.5),
+        evidenceIds,
+        createdAt: stamp, updatedAt: stamp,
+      }
+      const domain = await this.domain()
+      await domain.table('concepts').put(recordKey(sessionId, id), concept)
+      return concept
+    })
+  }
+
+  /** Link two concepts with a typed relation. */
+  async linkConcepts(sessionId, input = {}) {
+    return this.enqueue(sessionId, async () => {
+      await this.requireEngagement(sessionId)
+      const from = await this.record(sessionId, 'concept', input.fromId)
+      const to = await this.record(sessionId, 'concept', input.toId)
+      if (from === undefined) throw new Error(`unknown concept ${input.fromId}`)
+      if (to === undefined) throw new Error(`unknown concept ${input.toId}`)
+      const id = await this.nextId(sessionId, 'relation')
+      const relation = {
+        id, sessionId, fromId: from.id, toId: to.id,
+        kind: ['requires', 'enables', 'leads-to', 'contradicts', 'refines', 'related'].includes(input.kind) ? input.kind : 'related',
+        confidence: confidenceOf(input.confidence, 0.5),
+        evidenceIds: Array.isArray(input.evidenceIds) ? [...new Set(input.evidenceIds)] : [],
+        createdAt: now(),
+      }
+      const domain = await this.domain()
+      await domain.table('concept_relations').put(recordKey(sessionId, id), relation)
+      return relation
+    })
+  }
+
+  /** All concepts and relations in one session. */
+  async concepts(sessionId) {
+    return { concepts: await this.rows(sessionId, 'concepts'), relations: await this.rows(sessionId, 'concept_relations') }
+  }
+
+  /** Prune weak edges below a combined weight/pheromone threshold. */
+  async pruneGraph(sessionId, threshold = 0.2) {
+    return this.enqueue(sessionId, async () => {
+      await this.requireEngagement(sessionId)
+      const domain = await this.domain()
+      const edges = await this.rows(sessionId, 'edges')
+      const keep = []
+      const removed = []
+      for (const edge of edges) {
+        const strength = Math.min(Number(edge.weight ?? 0.5), Number(edge.pheromone ?? 0.5))
+        if (strength < threshold) removed.push(edge.id)
+        else keep.push(edge)
+      }
+      for (const id of removed) await domain.table('edges').delete(recordKey(sessionId, id))
+      return { threshold: Number(threshold), removed, kept: keep.length }
+    })
+  }
+
+  /** Evaporate exploration pheromone; low-value trails fade first. */
+  async decayPheromone(sessionId, factor = 0.95) {
+    return this.enqueue(sessionId, async () => {
+      await this.requireEngagement(sessionId)
+      const domain = await this.domain()
+      const edges = await this.rows(sessionId, 'edges')
+      const ratio = Number.isFinite(Number(factor)) ? Math.max(0, Math.min(1, Number(factor))) : 0.95
+      for (const edge of edges) {
+        await domain.table('edges').put(recordKey(sessionId, edge.id), {
+          ...edge,
+          pheromone: Math.max(0, Math.min(1, Number(edge.pheromone ?? 0.5) * ratio)),
+          updatedAt: now(),
+        })
+      }
+      return { factor: ratio, updated: edges.length }
+    })
+  }
+
+  /** Reinforce edges leaving one intent after a meaningful submission. */
+  async reinforcePheromone(sessionId, intentId, amount = 0.1) {
+    const domain = await this.domain()
+    const edges = await this.rows(sessionId, 'edges')
+    for (const edge of edges) {
+      if (edge.srcId !== intentId) continue
+      await domain.table('edges').put(recordKey(sessionId, edge.id), {
+        ...edge,
+        pheromone: Math.min(1, Number(edge.pheromone ?? 0.5) + Number(amount)),
+        updatedAt: now(),
+      })
+    }
+  }
+
+  /** Create the project entity when a session first references it. */
+  async ensureProject(projectId, defaults = {}) {
+    const id = String(projectId ?? '').trim()
+    if (id === '') return undefined
+    const domain = await this.domain()
+    const existing = domain.table('projects').get(id)
+    if (existing !== undefined) return existing
+    const stamp = now()
+    const project = {
+      id,
+      name: String(defaults.name ?? id).trim() || id,
+      description: String(defaults.description ?? ''),
+      target: String(defaults.target ?? ''),
+      status: 'active',
+      createdAt: stamp,
+      updatedAt: stamp,
+    }
+    await domain.table('projects').put(id, project)
+    return project
+  }
+
+  /** All project entities. */
+  async projects() {
+    const domain = await this.domain()
+    // Backfill entities for sessions linked before the projects table existed.
+    for (const [, engagement] of domain.table('engagements').entries()) {
+      if (engagement.projectId !== '') await this.ensureProject(engagement.projectId, { name: engagement.projectId, target: engagement.target })
+    }
+    return [...domain.table('projects').entries()].map(([, row]) => row).sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** Update one project's human-facing settings. */
+  async saveProject(input = {}) {
+    const projectId = String(input.projectId ?? input.id ?? '').trim()
+    if (projectId === '') throw new Error('projectId is required')
+    const domain = await this.domain()
+    const existing = domain.table('projects').get(projectId)
+    const stamp = now()
+    const project = {
+      id: projectId,
+      name: String(input.name ?? existing?.name ?? projectId).trim() || projectId,
+      description: String(input.description ?? existing?.description ?? ''),
+      target: String(input.target ?? existing?.target ?? ''),
+      status: ['active', 'archived', 'done'].includes(input.status) ? input.status : (existing?.status ?? 'active'),
+      createdAt: existing?.createdAt ?? stamp,
+      updatedAt: stamp,
+    }
+    await domain.table('projects').put(projectId, project)
+    return project
+  }
+
+  /** Delete a project entity and unlink its sessions; session data is preserved. */
+  async deleteProject(projectId, callerSessionId) {
+    const id = String(projectId ?? '').trim()
+    if (id === '') throw new Error('projectId is required')
+    await this.unlinkProject(id, callerSessionId)
+    const domain = await this.domain()
+    await domain.table('projects').delete(id)
+    return { projectId: id }
   }
 
   /** Session ids currently attached to one project grouping. */
@@ -859,6 +1036,8 @@ export default class LingeyeStore extends Service {
       layers: Array.isArray(input.layers) ? input.layers.map(String) : [],
       intentId: input.intentId,
       findingId: input.findingId,
+      state: 'active',
+      version: 1,
       createdAt: now(),
     }
     await domain.table('evidence').put(recordKey(sessionId, id), evidence)
@@ -870,6 +1049,41 @@ export default class LingeyeStore extends Service {
     return this.enqueue(sessionId, async () => {
       await this.requireEngagement(sessionId)
       return this.addEvidenceRecord(sessionId, input)
+    })
+  }
+
+  /** Retire evidence and cascade its dependent facts/findings to stale. */
+  async retireEvidence(sessionId, evidenceId, reason = '') {
+    return this.enqueue(sessionId, async () => {
+      await this.requireEngagement(sessionId)
+      const evidence = await this.record(sessionId, 'evidence', evidenceId)
+      if (evidence === undefined) throw new Error(`unknown evidence ${evidenceId}`)
+      const domain = await this.domain()
+      const stamp = now()
+      const retired = { ...evidence, state: 'retired', retiredAt: stamp, version: Number(evidence.version ?? 1) + 1, retiredReason: reason }
+      await domain.table('evidence').put(recordKey(sessionId, evidenceId), retired)
+      const facts = await this.rows(sessionId, 'facts')
+      const staleFacts = []
+      for (const fact of facts) {
+        if (!Array.isArray(fact.evidenceIds) || !fact.evidenceIds.includes(evidenceId)) continue
+        if (fact.state === 'stale') continue
+        await domain.table('facts').put(recordKey(sessionId, fact.id), { ...fact, state: 'stale' })
+        staleFacts.push(fact.id)
+      }
+      const findings = await this.rows(sessionId, 'findings')
+      const staleFindings = []
+      for (const finding of findings) {
+        if (!Array.isArray(finding.evidenceIds) || !finding.evidenceIds.includes(evidenceId)) continue
+        await domain.table('findings').put(recordKey(sessionId, finding.id), {
+          ...finding,
+          evidenceVersion: Number(finding.evidenceVersion ?? 0) + 1,
+          status: finding.status === 'confirmed' ? 'pending' : finding.status,
+          updatedAt: stamp,
+        })
+        staleFindings.push(finding.id)
+      }
+      await this.activity(sessionId, { kind: 'stale', summary: `证据 ${evidenceId} 已退役，级联 ${staleFacts.length} 事实 / ${staleFindings.length} 漏洞`, detail: reason })
+      return { evidenceId, retired: true, staleFacts, staleFindings, reason }
     })
   }
 
@@ -1164,6 +1378,7 @@ export default class LingeyeStore extends Service {
         }
         const nextIntent = { ...intent, state: intent.state === 'open' ? 'running' : intent.state, updatedAt: now() }
         await domain.table('intents').put(recordKey(sessionId, intent.id), nextIntent)
+        await this.reinforcePheromone(sessionId, intent.id, 0.05)
         return {
           intent: nextIntent,
           counts: {
@@ -1292,11 +1507,13 @@ export default class LingeyeStore extends Service {
       .map((intent) => {
         const missing = intent.derivedFromFactIds.filter(factId => !factIds.has(factId))
         const depsMet = missing.length === 0
-        const score = intent.priority * 10 + (depsMet ? 20 : -20) + (intent.state === 'running' ? 5 : 0) + Math.min(intent.assetIds.length, 5)
-        return { id: intent.id, title: intent.title, state: intent.state, priority: intent.priority, goalId: intent.goalId, assetIds: intent.assetIds, depsMet, missingDeps: missing, score }
+        const gain = informationGain(intent, data)
+        const score = intent.priority * 10 + (depsMet ? 20 : -20) + (intent.state === 'running' ? 5 : 0) + Math.min(intent.assetIds.length, 5) + gain * 8
+        return { id: intent.id, title: intent.title, state: intent.state, priority: intent.priority, goalId: intent.goalId, assetIds: intent.assetIds, depsMet, missingDeps: missing, informationGain: gain, score }
       })
       .sort((a, b) => b.score - a.score)
     const untestedAssets = data.assets.filter(asset => !assetTested.has(asset.id))
+    const knownIds = new Set([...data.goals, ...data.intents, ...data.facts, ...data.findings, ...data.assets, ...data.evidence].map(item => item.id))
     return {
       initialized: true,
       engagement: data.engagement,
@@ -1310,9 +1527,25 @@ export default class LingeyeStore extends Service {
         openGoals: data.goals.filter(goal => goal.status === 'open').map(goal => ({ id: goal.id, text: goal.text })),
         untestedAssets: untestedAssets.map(asset => ({ id: asset.id, type: asset.type, value: asset.value })),
         blockedIntents: data.intents.filter(intent => intent.state === 'blocked').map(intent => intent.id),
+        staleFacts: data.facts.filter(fact => fact.state === 'stale').map(fact => ({ id: fact.id, detail: fact.detail })),
+        retiredEvidence: data.evidence.filter(item => item.state === 'retired').map(item => item.id),
       },
+      hypotheses: hypothesisGroups(facts),
+      causal: {
+        cycles: findCycles(data.edges),
+        staleEdges: data.edges.filter(edge => !knownIds.has(edge.srcId) || !knownIds.has(edge.dstId)).length,
+      },
+      coverageGain: coverageOpportunities(data.assets, assetTested),
+      goalPaths: goalPaths(data),
       recentActivity: data.activity.slice(-8).reverse(),
     }
+  }
+
+  /** Replay the state without selected facts/evidence (counterfactual). */
+  async counterfactual(sessionId, removeIds = []) {
+    const data = await this.snapshot(sessionId)
+    if (data.engagement === null) return { initialized: false }
+    return replayCounterfactual(data, Array.isArray(removeIds) ? removeIds : [])
   }
 
   /** Review checklist: what remains open before reporting. */
@@ -1329,6 +1562,12 @@ export default class LingeyeStore extends Service {
     const tested = coveredAssetIds(data)
     for (const asset of data.assets) {
       if (!tested.has(asset.id)) items.push({ kind: 'asset', ref: asset.id, status: 'incomplete', text: `${asset.type} ${asset.value} 未被测试` })
+    }
+    for (const fact of data.facts) {
+      if (fact.state === 'stale') items.push({ kind: 'fact', ref: fact.id, status: 'stale', text: `事实已失效：${fact.detail}` })
+    }
+    for (const evidence of data.evidence) {
+      if (evidence.state === 'retired') items.push({ kind: 'evidence', ref: evidence.id, status: 'stale', text: `证据已退役：${evidence.label}` })
     }
     for (const finding of data.findings) {
       if (!finding.reproducibleSteps || finding.reproducibleSteps.length === 0) {

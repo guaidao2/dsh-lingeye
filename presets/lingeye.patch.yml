@@ -1,6 +1,6 @@
 # dsh-lingeye agent presets.
 #
-# Six presets share one storage domain (owned by the top-level
+# Nine presets share one storage domain (owned by the top-level
 # `dsh-lingeye/store` row) and differ only in the model-facing tool surface:
 #   lingeye                commander / planner (human-facing session)
 #   lingeye-worker         execution subagent (one intent per delegation)
@@ -8,6 +8,9 @@
 #   lingeye-intel          public/context intelligence subagent
 #   lingeye-enumerator     authorized recon/enumeration subagent
 #   lingeye-threat-modeler attack-path/threat-model subagent
+#   lingeye-pre            pre-exploitation / foothold subagent
+#   lingeye-post           post-exploitation / internal analysis subagent
+#   lingeye-evasion        red-team noise reduction subagent
 #
 # The commander's delegation rows select lingeye-worker by default and expose
 # the other roles through `allowedAgentPresets`.
@@ -206,6 +209,123 @@
           - id: lingeye-worker
             name: 'dsh-lingeye/worker'
 
+    - id: preset-lingeye-pre
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lingeye-pre
+        name: 灵眼前渗透（子 agent）
+        description: 灵眼的前渗透子 agent：在授权范围内执行被委派的验证/利用，拿到第一个立足点后停止，证据写回父会话。
+        order: 16
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是「灵眼」的前渗透子 agent，不是指挥官。你只执行被委派的一条验证/利用意图：在授权范围内验证假设，直到取得第一个立足点后停止。不扩大范围、不创建目标或意图；每次动作写清预期观测，成功/失败都用 ly_submit 提交，证据可复现。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: lingeye-worker
+            name: 'dsh-lingeye/worker'
+
+    - id: preset-lingeye-post
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lingeye-post
+        name: 灵眼后渗透（子 agent）
+        description: 灵眼的后渗透子 agent：在已取得立足点后分析内网弱点、权限提升与横向路径，证据写回父会话。
+        order: 17
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是「灵眼」的后渗透子 agent，不是指挥官。你只在已取得立足点的前提下，分析被委派范围内的内网弱点、权限提升与横向路径。不扩大授权范围、不创建目标或意图；每条结论绑定证据，越界或无法确认时提交 negative/assumed，不臆造。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: lingeye-worker
+            name: 'dsh-lingeye/worker'
+
+    - id: preset-lingeye-evasion
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lingeye-evasion
+        name: 灵眼降噪（子 agent）
+        description: 灵眼的红队降噪子 agent：减少行动噪声与可归因痕迹，但不删除审计、证据或日志。
+        order: 18
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是「灵眼」的红队降噪子 agent，不是指挥官。你只做被委派的降噪与痕迹管理：减少噪声、控制可归因面。不得删除审计、证据、日志或历史记录，不得绕过授权边界，不创建目标或意图；所有动作与残余痕迹用 ly_submit 写回父会话。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: lingeye-worker
+            name: 'dsh-lingeye/worker'
+
     - id: preset-lingeye
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -286,6 +406,9 @@
                     - lingeye-intel
                     - lingeye-enumerator
                     - lingeye-threat-modeler
+                    - lingeye-pre
+                    - lingeye-post
+                    - lingeye-evasion
                   modelSelectionSettings: true
               - id: workflow-ptc
                 name: '@deepseek-ai/dsh-workflow-ptc'
