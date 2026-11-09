@@ -86,6 +86,8 @@ function toConfig(row) {
       url: row.url,
       headers: Object.fromEntries((row.headers ?? []).map(item => [item.key, item.value])),
       toolCallTimeoutMs: row.timeoutMs ?? 60000,
+      closeTimeoutMs: 5000,
+      expandTemplates: false,
       failOnStartupError: row.failOnStartupError !== false,
     }
   }
@@ -97,6 +99,8 @@ function toConfig(row) {
     env: Object.fromEntries((row.env ?? []).map(item => [item.key, item.value])),
     cwd: '',
     toolCallTimeoutMs: row.timeoutMs ?? 60000,
+    closeTimeoutMs: 5000,
+    expandTemplates: false,
     failOnStartupError: row.failOnStartupError !== false,
   }
 }

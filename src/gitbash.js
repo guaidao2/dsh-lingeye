@@ -5,8 +5,9 @@
  * so this plugin does not try to replace that service. Instead it registers a
  * host-global `bash` tool only while the user has enabled Git Bash:
  *
- *   - enabled: model sees `bash` (Git Bash) and no `pwsh`;
- *   - disabled: no custom `bash` tool, native `pwsh` remains untouched.
+ *   - enabled: model gets `bash` (Git Bash); the agent-scoped pwsh gate
+ *     unmounts the official `pwsh` tool, and the guard denies stray calls;
+ *   - disabled: no custom `bash` tool, the gate keeps native `pwsh` mounted.
  *
  * The tool uses the host subprocess seam directly. It intentionally requires
  * danger-full-access because the MSYS runtime cannot initialize in the
@@ -17,7 +18,6 @@ import {
   BASH_TOOL_DESCRIPTION,
   buildArgv,
   buildEnv,
-  LEGACY_GITBASH_TOOL_NAME,
   TOOL_NAME,
   resolveConfig,
   resolveWorkdir,
@@ -29,8 +29,6 @@ import { tool } from './tool.js'
 export const name = 'lingeye-gitbash'
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'lingeyeEnvironment']
-
-const MAX_TIMER_DELAY_MS = 2147483647
 
 function timeoutSignal(upstream, timeoutMs) {
   const timer = new AbortController()
@@ -162,13 +160,6 @@ export function apply(ctx, config = {}) {
   }
   sync()
   ctx.effect(() => environment.subscribe(sync))
-
-  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
-    const assembled = await next()
-    if (!enabled || !Array.isArray(assembled?.tools)) return assembled
-    const filtered = assembled.tools.filter(tool => tool?.name !== 'pwsh' && tool?.name !== LEGACY_GITBASH_TOOL_NAME)
-    return filtered.length === assembled.tools.length ? assembled : { ...assembled, tools: filtered }
-  })
 
   ctx.tools.guard(exec => {
     if (enabled && exec?.name === 'pwsh') {

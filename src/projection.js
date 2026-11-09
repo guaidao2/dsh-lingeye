@@ -79,7 +79,7 @@ export function foldLingeyeEvent(state, event) {
 /** Register the `lingeye` projection unit on the session-projection registry. */
 export function registerProjection(ctx) {
   ctx.inject(['sessionProjections'], (scope) => {
-    scope.sessionProjections.register({
+    const registration = scope.sessionProjections.register({
       key: 'lingeye',
       stateSchema,
       init: () => null,
@@ -92,6 +92,10 @@ export function registerProjection(ctx) {
       // v3: write-triggered plugin records carry the whole state.
       // v4: those records also carry counts and the rendered report.
       stateVersion: 4,
+    })
+    // Newer hosts return a thenable handle; older hosts return a disposer.
+    void Promise.resolve(registration).catch(error => {
+      scope.logger?.warn?.(`lingeye projection registration failed: ${error instanceof Error ? error.message : String(error)}`)
     })
   })
 }

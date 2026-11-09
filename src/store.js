@@ -360,11 +360,9 @@ export default class LingeyeStore extends Service {
           label: `lingeye ${intent.id}`,
           delivery: 'parent',
           signal: controller.signal,
-          request: {
-            parent,
-            agentPreset: 'lingeye-worker',
-            prompt: [{ type: 'text', text: this.dispatchPrompt(data, intent) }],
-          },
+          parent,
+          agentPreset: 'lingeye-worker',
+          prompt: [{ type: 'text', text: this.dispatchPrompt(data, intent) }],
         })
         void activation.result
           .then(() => undefined, () => undefined)

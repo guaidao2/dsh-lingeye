@@ -39,7 +39,7 @@
 - Web 页签：总览、探索（列表/链路图切换）、资产、漏洞、证据、数据流、报告、复测。
 - 灵眼操控中心采用标签页：总览、项目、环境、MCP。
 - 灵眼操控中心：全局只读视图，汇总灵眼会话、项目组、漏洞数、Git Bash 状态与认证 Cookie 健康度。
-- 环境增强：可选 Git Bash，默认关闭；开启后所有会话的 shell 切到 bash 语义，适合渗透工具链。
+- 环境增强：可选 Git Bash，默认关闭；开启后增加 `bash` 工具并从模型工具列表移除 `pwsh`，适合渗透工具链。
 - 环境维护：检测 `dsh-auth-*` cookie 数量与请求头大小，接近 16KB 时提示；默认只检测，手动确认后才清理旧 cookie。
 - MCP：表格式配置 stdio / streamable-http 服务器，复用官方 mcp-client；不提供 JSON/YAML 手填，也不与其它 MCP 插件静默抢命名。
 
@@ -47,7 +47,7 @@
 
 Git Bash 默认关闭，需要显式开启。打开「灵眼操控中心」，在「环境增强 / 维护」里勾选启用，并填写 `bash.exe` 路径；留空会自动检测。保存后立即生效。
 
-自动检测顺序是 `GIT_BASH`、常见安装路径、`PATH`（含 `git\cmd\..\bin` 反推）；不读注册表，也不会把 `System32\bash.exe` 当成 Git Bash。开启后模型只看到 `bash`，不再看到 `pwsh`。默认关闭时保持原样。
+自动检测顺序是 `GIT_BASH`、常见安装路径、`PATH`（含 `git\cmd\..\bin` 反推）；不读注册表，也不会把 `System32\bash.exe` 当成 Git Bash。开启后模型多一个 `bash`，`pwsh` 工具会被卸载、不再出现在工具列表里。默认关闭时 `pwsh` 正常挂载。
 
 
 
@@ -74,7 +74,7 @@ MCP 传输只支持 `stdio` 和 `streamable-http`；旧 HTTP+SSE 不在支持范
 
 ## 安装
 
-需要 DSH `>= 0.2.1-rc.2 < 0.3.0` 与 Node.js `>= 22.5`（宿主自带）。
+需要 DSH `>= 0.2.2-rc.1 < 0.3.0` 与 Node.js `>= 22.5`（宿主自带）。
 
 从本地目录安装（开发或内部分发）：
 
@@ -86,7 +86,7 @@ dsh plugin --profile web add <path-to-dsh-lingeye>
 
 ```powershell
 npm pack
-dsh plugin --profile web add ./dsh-lingeye-0.6.0.tgz
+dsh plugin --profile web add ./dsh-lingeye-0.6.1.tgz
 ```
 
 安装后重启 DSH，新建会话时选择「灵眼渗透测试模式」。
@@ -172,7 +172,7 @@ Windows 上默认启用；如需关闭，在 profile patch 里覆盖该行：
 
 ## 兼容性
 
-- DSH：`>= 0.2.1-rc.2 < 0.3.0`（`engines.dsh`）。
+- DSH：`>= 0.2.2-rc.1 < 0.3.0`（`engines.dsh`）。
 - 存储：`lingeye` 域使用 profile 默认后端（JSON）；记录按会话隔离，重启不丢。
 - 客户端：手写 `window.__ModuleLoader__` 工厂，无构建步骤；页签只在该模式会话显示。
 - 上游修复 ACL 问题后，可直接关闭内置补丁，行为与出厂一致。

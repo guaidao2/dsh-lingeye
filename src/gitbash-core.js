@@ -12,14 +12,8 @@ import { basename, isAbsolute, resolve } from 'node:path'
 /** Stable tool name exposed to the model (the single bash tool). */
 export const TOOL_NAME = 'bash'
 
-/** Legacy separate tool name, kept only to hide/deny it after the refactor. */
-export const LEGACY_GITBASH_TOOL_NAME = 'gitbash'
-
 /** Model-facing description shown for the bash tool on Windows/Git Bash. */
 export const BASH_TOOL_DESCRIPTION = `Execute a bash command (Git Bash / Git for Windows bash.exe -lc) and return combined stdout/stderr. Use POSIX/bash syntax, not PowerShell: $VAR, export NAME=value, ls/grep/find/sed/awk, pipes |, redirection > >>, &&/||, command substitution $(...). Paths look like /d/WorkSpace or C:/WorkSpace; avoid raw backslashes unless quoted. PATH includes /usr/bin and /mingw64/bin so git, npm, ssh, and common Unix tools work. Each call spawns a fresh non-interactive shell: no cwd/export/alias state persists between calls — pass workdir or chain stateful steps with &&. Non-zero exits are reported as [exit code: N]; investigate failures before moving on.`
-
-/** Backwards-compatible alias for tests/tools that still import the old name. */
-export const GITBASH_TOOL_DESCRIPTION = BASH_TOOL_DESCRIPTION
 
 /** Environment overrides that keep Git Bash output machine-friendly and UTF-8. */
 export const ENV_OVERRIDES = {
